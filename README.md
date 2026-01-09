@@ -1,11 +1,18 @@
-# Chitu-Diffusion
-目前处于测试和开发阶段。欢迎感兴趣的同学加入团队。
-测试的模型为Wan系列, 会陆续补充支持新的模型。
-正在陆续补充支持新的模型，算子和算法优化。
+# Smart-Diffusion
+
+本仓库是Chitu-Diffusion的纯享版。
+
+[Chitu](https://github.com/thu-pacman/chitu)是来自清华大学PACMAN团队与清程极智(QingCheng.ai)共同开发的高性能LLM推理框架，我们希望能同时为蓬勃发展的Diffusion生态提供支持。于是在Chitu的API和调度思路下重构了DiT模型，保持调度灵活性的同时提供极致的性能，为大家提供一款真正简单好用的AIGC加速框架。
+
+Chitu-Diffusion目前处于测试和开发阶段，我们正在努力让她变得更好！欢迎感兴趣的同学加入团队，使用、测试和参与开发。
+
+已经支持Wan-T2V系列, 正在陆续补充支持新的模型，算子和算法优化。
 
 # Setup
- > Python3.12, cuda 12.4
+
 ## Environment
+
+推荐的软件环境： Python3.12, cuda 12.4
 
 按照`chitu/diffusion/requirements.txt`安装。
 并运行：
@@ -13,7 +20,7 @@
 pip install -e .
 ```
 
-Flash Attention建议用wheel安装：https://github.com/Dao-AILab/flash-attention/releases/tag/v2.7.1.post2
+> Flash Attention建议用wheel安装：https://github.com/Dao-AILab/flash-attention/releases/tag/v2.7.1.post2
 
 ## Model Checkpoint
 > Supported model-ids:
@@ -28,6 +35,7 @@ HF_ENDPOINT=https://hf-mirror.com hf download <model-id> --local-dir ./ckpts
 ```
 
 # Run Demo
+
 **模型架构参数**(层数、注意力头数等)是静态的，在`chitu/config/models/<diffusion-model>.yaml`中进行设置。
 
 **用户参数**(生成步数、形状等)是动态的，`Chitu`提供`DiffusionUserParams`以请求为单位进行设置。
