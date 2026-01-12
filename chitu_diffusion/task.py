@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import tqdm
 import pickle
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict, fields
 from enum import Enum
 from logging import getLogger
 from typing import Any, Optional, Union, Dict, List, Deque, Tuple
@@ -60,7 +60,7 @@ class DiffusionUserParams:
     # 其他参数
     save_dir: Optional[str] = "./output"  # 输出保存路径
     # FlexCache参数
-    flex_cache: Optional[str] = None # 支持teacache
+    flexcache: Optional[str] = None # 支持teacache
     
 
 class DiffusionUserRequest:
@@ -202,54 +202,53 @@ class DiffusionTask:
         try:
             # 1. 准备基本数据
             serializable_data = {
-                # 基本信息
                 'task_id': self.task_id,
                 'task_type': self.task_type,
                 'status': self.status,
                 'error_message': self.error_message,
                 'is_terminate_signal': self.is_terminate_signal(),
-                'signal_data': self.signal_data,  # 终止信号数据
+                'signal_data': self.signal_data,
             }
             
-            # 2. 处理用户请求数据（仅当req不为None时）
+            # 2. 自动序列化用户请求数据
             if self.req is not None:
-                serializable_data['user_params'] = {
-                    'role': self.req.params.role,
-                    'size': self.req.params.size,
-                    'frame_num': self.req.params.frame_num,
-                    'prompt': self.req.params.prompt,
-                    'negative_prompt': self.req.params.negative_prompt,
-                    'seed': self.req.params.seed,
-                    'sample_solver': self.req.params.sample_solver,
-                    'num_inference_steps': self.req.params.num_inference_steps,
-                    'save_dir': self.req.params.save_dir,
-                }
+                # 使用asdict自动转换dataclass
+                serializable_data['user_params'] = asdict(self.req.params)
+                # 如果有非dataclass字段也需要保存
+                serializable_data['request_id'] = self.req.request_id
+                serializable_data['init_image_exists'] = self.req.init_image is not None
             else:
                 serializable_data['user_params'] = None
             
-            # 3. 处理Buffer数据（仅当buffer不为None时）
+            # 3. 自动处理Buffer数据
             if self.buffer is not None:
-                serializable_data['buffer_metadata'] = {
-                    'seq_len': self.buffer.seq_len,
-                    'current_step': self.buffer.current_step,
-                    'timesteps': self.buffer.timesteps,
-                }
+                buffer_dict = {}
+                tensor_fields = []
+                
+                # 遍历buffer的所有字段
+                for field_info in fields(self.buffer):
+                    field_name = field_info.name
+                    field_value = getattr(self.buffer, field_name)
+                    
+                    # 区分tensor和非tensor字段
+                    if isinstance(field_value, torch.Tensor):
+                        tensor_fields.append(field_name)
+                    else:
+                        buffer_dict[field_name] = field_value
+                
+                serializable_data['buffer_metadata'] = buffer_dict
+                serializable_data['tensor_field_names'] = tensor_fields
             else:
                 serializable_data['buffer_metadata'] = None
+                serializable_data['tensor_field_names'] = []
             
-            # 4. 序列化tensor数据（仅当buffer存在时）
+            # 4. 序列化tensor数据
             tensor_data = {}
             if self.buffer is not None:
-                if self.buffer.text_embeddings is not None:
-                    tensor_data['text_embeddings'] = self.buffer.text_embeddings.detach().clone()
-                if self.buffer.negative_embeddings is not None:
-                    tensor_data['negative_embeddings'] = self.buffer.negative_embeddings.detach().clone()
-                if self.buffer.latents is not None:
-                    tensor_data['latents'] = self.buffer.latents.detach().clone()
-                if self.buffer.denoised_latents is not None:
-                    tensor_data['denoised_latents'] = self.buffer.denoised_latents.detach().clone()
-                if self.buffer.generated_image is not None:
-                    tensor_data['generated_image'] = self.buffer.generated_image.detach().clone()
+                for field_name in serializable_data['tensor_field_names']:
+                    tensor_value = getattr(self.buffer, field_name)
+                    if tensor_value is not None:
+                        tensor_data[field_name] = tensor_value.detach().clone()
             
             # 5. 打包所有数据
             full_data = {
@@ -259,8 +258,6 @@ class DiffusionTask:
             
             # 6. 使用pickle序列化
             serialized_bytes = pickle.dumps(full_data)
-            
-            # 7. 转换为torch.Tensor并移到目标设备
             serialized_array = torch.frombuffer(serialized_bytes, dtype=torch.uint8)
             final_tensor = serialized_array.to(device)
             
@@ -273,43 +270,40 @@ class DiffusionTask:
 
     @staticmethod
     def deserialize(serialized_tensor: torch.Tensor) -> 'DiffusionTask':
-        """从torch.Tensor反序列化DiffusionTask"""
+        """从torch.Tensor反序列化DiffusionTask - 自适应版本"""
         try:
             # 1. 移到CPU进行反序列化
             tensor_cpu = serialized_tensor.cpu()
-            
-            # 2. 转换回bytes并反序列化
             serialized_bytes = tensor_cpu.byte().numpy().tobytes()
             full_data = pickle.loads(serialized_bytes)
             metadata = full_data['metadata']
             tensor_data = full_data['tensors']
             
-            # 3. 重建用户请求对象（如果存在）
+            # 2. 重建用户请求对象
             user_request = None
             if metadata['user_params'] is not None:
+                # 自动从字典创建DiffusionUserParams
                 user_params = DiffusionUserParams(**metadata['user_params'])
                 user_request = DiffusionUserRequest(
-                    request_id=metadata['task_id'],
+                    request_id=metadata['request_id'],
                     params=user_params,
                 )
             
-            # 4. 重建buffer（如果存在）
+            # 3. 自动重建buffer
             buffer = None
             if metadata['buffer_metadata'] is not None:
                 buffer = DiffusionTaskBuffer()
-                buffer_meta = metadata['buffer_metadata']
-                buffer.seq_len = buffer_meta['seq_len']
-                buffer.current_step = buffer_meta['current_step']
-                buffer.timesteps = buffer_meta['timesteps']
                 
-                # 恢复buffer中的tensor
-                buffer.text_embeddings = tensor_data.get('text_embeddings')
-                buffer.negative_embeddings = tensor_data.get('negative_embeddings')
-                buffer.latents = tensor_data.get('latents')
-                buffer.denoised_latents = tensor_data.get('denoised_latents')
-                buffer.generated_image = tensor_data.get('generated_image')
+                # 恢复非tensor字段
+                for key, value in metadata['buffer_metadata'].items():
+                    setattr(buffer, key, value)
+                
+                # 恢复tensor字段
+                for field_name in metadata['tensor_field_names']:
+                    if field_name in tensor_data:
+                        setattr(buffer, field_name, tensor_data[field_name])
             
-            # 5. 重建任务对象
+            # 4. 重建任务对象
             task = DiffusionTask(
                 task_id=metadata['task_id'],
                 task_type=metadata['task_type'],
@@ -318,7 +312,6 @@ class DiffusionTask:
                 signal_data=metadata.get('signal_data', {})
             )
             
-            # 6. 恢复任务状态
             task.status = metadata['status']
             task.error_message = metadata['error_message']
             
@@ -328,13 +321,6 @@ class DiffusionTask:
         except Exception as e:
             logger.error(f"Failed to deserialize task: {e}")
             raise
-
-    def __repr__(self):
-        signal_info = f" reason={self.signal_data.get('reason', 'N/A')}" if self.is_terminate_signal() else ""
-        return (
-            f"DiffusionTask(id={self.task_id}, type={self.task_type}, "
-            f"status={self.status}{signal_info})"
-        )
 
     @staticmethod
     def create_empty_serialization(size: int, device: str = "cpu") -> torch.Tensor:
