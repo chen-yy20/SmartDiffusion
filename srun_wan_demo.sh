@@ -19,4 +19,6 @@ ckpt_dir="/home/zhongrx/cyy/Wan2.1/Wan2.1-T2V-1.3B"
 # ckpt_dir="/home/zhongrx/cyy/model/Wan22-t2v-a14b"
 
 ./script/srun_multi_node.sh 1 $num_gpus ./test/test_generate.py models=$model models.ckpt_dir=$ckpt_dir \
-    infer.diffusion.cp_size=$cp_size infer.diffusion.up_limit=2 infer.diffusion.low_memory=false
+    infer.diffusion.cp_size=$cp_size infer.diffusion.up_limit=2 \
+    # infer.diffusion.low_memory=false \
+    # infer.diffusion.use_flexcache=false \

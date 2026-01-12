@@ -59,8 +59,8 @@ class DiffusionUserParams:
     num_inference_steps: int = None
     # 其他参数
     save_dir: Optional[str] = "./output"  # 输出保存路径
-    # clip_skip: int = 1
-    # strength: float = 1.0  # for img2img
+    # FlexCache参数
+    flex_cache: Optional[str] = None # 支持teacache
     
 
 class DiffusionUserRequest:
