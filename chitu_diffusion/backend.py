@@ -34,6 +34,8 @@ from chitu_core.distributed.parallel_state import (
 from chitu_core.models.registry import ModelType, get_model_class
 from chitu_diffusion.modules.attention.diffusion_attn_backend import DiffusionAttnBackend, DiffusionAttention_with_CP
 
+from chitu_diffusion.flex_cache.flexcache_manager import FlexCacheManager
+
 # from chitu_core.distributed.moe_token_dispatcher import init_token_dispatcher
 if TYPE_CHECKING:
     from chitu_diffusion.generator import Generator
@@ -45,6 +47,11 @@ class BackendState(Enum):
     Running = 1
     Terminating = 2  # All tasks done, but rank 0 should tell others to terminate
     Terminated = 3
+
+class CFGType(Enum):
+    POS = "pos"
+    NEG = "neg"
+    BOTH = "both"
     
 class DiffusionBackend:
     # init once
@@ -69,14 +76,16 @@ class DiffusionBackend:
     
     # diffusion
     do_cfg = True
-    generator: Optional["Generator"] = None
+    cfg_type: Optional[CFGType] = None # pos, neg, both
+    generator: Optional["Generator"] = None # 加双引号是正向引用，Generator定义在此段代码之后
     text_encoder = None
-    cache_manager = None
     active_model = None
     active_model_id = 0
     vae = None
     boundary = None
     guidance_scale = None
+    flexcache: Optional["FlexCacheManager"] = None
+
 
     @staticmethod
     def check_and_convert_config(args):
@@ -262,6 +271,8 @@ class DiffusionBackend:
 
     @staticmethod
     def memory_used(msg: str = "Memory Usage"):
+        # 固定 msg 的输出长度为 20 个字符，超出部分用 ... 代替
+        msg = (msg[:17] + '...') if len(msg) > 20 else msg.ljust(20)
         logger.info(
             f"[{msg}] | GPU-Alloc:{torch.cuda.memory_allocated()/1024**3:.3f} Max:{torch.cuda.max_memory_allocated()/1024**3:.3f} Rsrv:{torch.cuda.memory_reserved()/1024**3:.3f} GB  | CPU:{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024**2:.3f} GB"
         )
@@ -269,10 +280,10 @@ class DiffusionBackend:
     @staticmethod
     def switch_active_model(flush: bool):
         # 先将当前活跃模型offload到CPU
-        low_memory = getattr(DiffusionBackend.args.infer.diffusion, "low_memory", False)
+        low_mem_level = getattr(DiffusionBackend.args.infer.diffusion, "low_mem_level", 0)
 
         # offload active model if low memory
-        if low_memory and DiffusionBackend.active_model is not None:
+        if low_mem_level >= 3 and DiffusionBackend.active_model is not None:
             current_idx = DiffusionBackend.active_model_id
             if current_idx < len(DiffusionBackend.model_pool):
                 # 将当前模型移回CPU并保存到model_pool
@@ -385,7 +396,7 @@ class DiffusionBackend:
         
     @staticmethod
     def _get_init_device(args):
-        if torch.cuda.is_available() and not args.infer.diffusion.low_memory:
+        if torch.cuda.is_available() and args.infer.diffusion.low_mem_level<3:
             device = torch.cuda.current_device()
         else:
             device = 'cpu'
@@ -404,8 +415,11 @@ class DiffusionBackend:
             Initialized processor or None if not a multimodal model
         """
         
-        # init_device = DiffusionBackend._get_init_device(args)
-        init_device = torch.device('cpu') # TODO: 根据显存实际进行offload，目前默认offload encoder。
+        if args.infer.diffusion.low_mem_level >= 2:
+            init_device = torch.device('cpu') 
+        else:
+            init_device = DiffusionBackend._get_init_device(args)
+
         if "Wan" in args.models.name:
             from chitu_diffusion.modules.encoders.t5 import T5EncoderModel
             logger.info(f"Initializing T5 encoder for {args.models.name}")
@@ -430,25 +444,38 @@ class DiffusionBackend:
         Arguments:
             args: Configuration with model settings
         """
-        
         init_device = DiffusionBackend._get_init_device(args)
-        if "Wan" in args.models.name:
-            from chitu_diffusion.modules.vaes.wan_vae import WanVAE
-            logger.info(f"Initializing Wan VAE for {args.models.name}")
 
+        if "Wan" in args.models.name:
+            # TODO: Wan vae 不支持tiling或者slicing，因此只能offload。
+            # 但是offload vae 貌似没有意义，主要显存都是activation。
+            # 希望能替换为diffusers版本的vae。
+            from chitu_diffusion.modules.vaes.wan_vae import WanVAE
+            # from chitu_diffusion.modules.vaes.wan_vae_diffusers import AutoencoderKLWan
+            logger.info(f"Initializing Wan VAE for {args.models.name}")
             vae = WanVAE(
                     vae_pth=os.path.join(args.models.ckpt_dir, args.models.vae.checkpoint),
                     device = init_device,
                 )
             logger.info(f"Initialized Wan VAE for {args.models.name}")
         else:
+            # 将来其他vae优先支持slicing和tiling
             vae = None
         return vae
     
     @staticmethod
-    def _init_cache_manager():
-        # TODO: Unified Feature Caching mechanism.
-        pass
+    def _init_cache_manager(args):
+        """
+        初始化缓存管理器
+        将会支持多种Feature Cache策略
+        """
+        # 此处initialize的主要任务应该是开辟一段显存buffer（cpu/gpu）
+        manager = FlexCacheManager(max_cache_memory=20) if args.infer.diffusion.enable_flexcache else None
+
+        # 在模型初始化后启用缓存
+        # 注意：这里需要在模型构建完成后调用 enable_cache_for_backend()
+        logger.info("[CacheManager] Cache manager initialized")
+        return manager
 
     @staticmethod
     def _init_attention_backend(args):
@@ -566,7 +593,8 @@ class DiffusionBackend:
         DiffusionBackend.text_encoder = DiffusionBackend._init_text_encoder(args)
         DiffusionBackend.vae = DiffusionBackend._init_vae(args)
 
-        # TODO: feature cache manager
+        # Initialize feature cache manager
+        DiffusionBackend.flexcache = DiffusionBackend._init_cache_manager(args)
 
         # Initialize attention backend
         attn_backend = DiffusionBackend._init_attention_backend(args)

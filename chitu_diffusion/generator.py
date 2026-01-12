@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+import sys
 import math
 import torch
 import torch.distributed as dist
@@ -15,8 +16,7 @@ from tqdm import tqdm
 
 from logging import getLogger
 from chitu_core.global_vars import get_global_args, get_slot_handle, get_timers
-from chitu_diffusion.backend import DiffusionBackend
-from chitu_diffusion.backend import BackendState
+from chitu_diffusion.backend import BackendState, CFGType, DiffusionBackend
 from chitu_diffusion.task import DiffusionTask, DiffusionTaskType, DiffusionTaskPool, DiffusionTaskStatus
 from chitu_core.distributed.parallel_state import (
     get_cfg_group,
@@ -40,7 +40,6 @@ from contextlib import contextmanager
 
 @contextmanager
 def device_scope(model: torch.nn.Module):
-    # low_mem = getattr(DiffusionBackend.args.infer.diffusion, "low_memory", False)
     original_device = None
     
     if model is not None and torch.cuda.is_available():
@@ -58,7 +57,7 @@ def device_scope(model: torch.nn.Module):
             model.to(target_device)
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            DiffusionBackend.memory_used(f"Offloaded model to {target_device}")
+            DiffusionBackend.memory_used(f"Offloaded {target_device}")
 
 class DiffusionTaskDispatcher():
     def __init__(self):
@@ -254,13 +253,17 @@ class Generator:
         if self.cfg_size == 1:
             if task.buffer.text_embeddings is None:
                 payload = task.req.get_prompt()
+                DiffusionBackend.cfg_type = CFGType.POS
             else:
                 payload = task.req.get_n_prompt()
+                DiffusionBackend.cfg_type = CFGType.NEG
         elif self.cfg_size == 2:
             if get_cfg_group().rank_in_group == 0:
                 payload = task.req.get_prompt()
+                DiffusionBackend.cfg_type = CFGType.POS
             else:
                 payload = task.req.get_n_prompt()
+                DiffusionBackend.cfg_type = CFGType.NEG
 
         logger.info(f"[text_encode_step] task_id={task.task_id}, txt={payload}")
         
@@ -285,8 +288,10 @@ class Generator:
             if self.cfg_size == 2:
                 if get_cfg_group().rank_in_group == 0:
                     context = task.buffer.text_embeddings
+                    DiffusionBackend.cfg_type = CFGType.POS
                 else:
                     context = task.buffer.negative_embeddings
+                    DiffusionBackend.cfg_type = CFGType.NEG
 
                 cfg_partial_noise_pred = DiffusionBackend.active_model(
                     latent_model_input,
@@ -296,12 +301,14 @@ class Generator:
                 )
                 noise_pred_cond, noise_pred_uncond = self.cfg_dispatcher.all_gather_cfg_noise_preds(cfg_partial_noise_pred)
             else:
+                DiffusionBackend.cfg_type = CFGType.POS
                 noise_pred_cond = DiffusionBackend.active_model(
                     latent_model_input,
                     t=timestep,
                     context=task.buffer.text_embeddings,
                     seq_len=task.buffer.seq_len
                 )
+                DiffusionBackend.cfg_type = CFGType.NEG
                 noise_pred_uncond = DiffusionBackend.active_model(
                     latent_model_input,
                     t=timestep,
@@ -311,6 +318,7 @@ class Generator:
             noise_pred = noise_pred_uncond + \
                 DiffusionBackend.guidance_scale * (noise_pred_cond - noise_pred_uncond)
         else:
+            DiffusionBackend.cfg_type = CFGType.POS
             noise_pred = DiffusionBackend.active_model(
                 latent_model_input,
                 t=timestep,
@@ -429,6 +437,15 @@ class Generator:
         
         DiffusionBackend.switch_active_model(flush=True)
 
+        # enable flexcache
+        if task.req.params.flexcache == "teacache":
+            from chitu_diffusion.flex_cache.strategy.teacache import TeaCacheStrategy
+            cache_strategy = TeaCacheStrategy(task=task)
+            DiffusionBackend.flexcache.set_strategy(cache_strategy)
+            # wrap model
+            DiffusionBackend.flexcache.strategy.wrap_module_with_strategy(DiffusionBackend.active_model)
+            logger.info("Teacache: Successfully wrapped models!")
+
         # logger.info(f"[Pre Denoise] Init {latents.shape=} {timesteps=}")
 
 
@@ -442,11 +459,11 @@ class Generator:
         elif is_main_process:
             logger.warning(f"Task {task.task_id} - Status: {task.status}")
         
+        if is_main_process:
+            logger.info(f"[Task] ============ current stage: {task.task_type} ===============")
+
         # 处理Text Encode阶段
-        if task.task_type == DiffusionTaskType.TextEncode:
-            if is_main_process:
-                logger.info(f"[Task] current stage: {task.task_type}")
-                
+        if task.task_type == DiffusionTaskType.TextEncode:                
             if self.cfg_size == 1:
                 if task.buffer.text_embeddings is None:
                     # 首次text encode (正向prompt)
@@ -482,8 +499,6 @@ class Generator:
         
         # 处理VAE Encode阶段
         elif task.task_type == DiffusionTaskType.VAEEncode:
-            if is_main_process:
-                logger.info(f"[Task] current stage: {task.task_type}")
             task.buffer.latents = tokens  # 保存编码后的latents
             
             # 转换到Denoise阶段
@@ -495,36 +510,13 @@ class Generator:
         
         # 处理Denoise阶段（关键：需要多次执行）
         elif task.task_type == DiffusionTaskType.Denoise:
-            # 只在主进程的开始denoise时显示阶段信息和初始化进度条
-            if task.buffer.current_step == 0:
-                if is_main_process:
-                    logger.info(f"[Task] current stage: {task.task_type}")
-                    # 将进度条作为task的属性
-                    task.progress_bar = tqdm(
-                        total=task.req.params.num_inference_steps,
-                        desc=f"Task {task.task_id} Denoising",
-                        unit="steps",
-                        dynamic_ncols=True,  # 自适应终端宽度
-                        leave=True  # 保持进度条显示
-                    )
-            
             # 更新当前去噪后的latents
             task.buffer.latents = tokens
             task.buffer.current_step += 1
             
-            # 主进程更新进度条
-            # 主进程更新进度条
-            if is_main_process and hasattr(task, 'progress_bar') and task.progress_bar is not None:
-                task.progress_bar.update(1)
-                task.progress_bar.refresh()  # 强制刷新显示
 
             # 检查是否完成所有denoise步骤
             if task.buffer.current_step >= task.req.params.num_inference_steps:
-                # 主进程关闭进度条
-                if is_main_process and hasattr(task, 'progress_bar') and task.progress_bar is not None:
-                    task.progress_bar.close()
-                    task.progress_bar = None
-
                 # 所有denoise步骤完成，转换到VAE Decode
                 task.task_type = DiffusionTaskType.VAEDecode
                 if is_main_process:
@@ -540,14 +532,7 @@ class Generator:
                 return True
         
         # 处理VAE Decode阶段（最终阶段）
-        elif task.task_type == DiffusionTaskType.VAEDecode:
-            if is_main_process:
-                logger.info(f"[Task] current stage: {task.task_type}")
-                # 确保进度条被正确关闭
-                if hasattr(task, 'progress_bar') and task.progress_bar is not None:
-                    task.progress_bar.close()
-                    task.progress_bar = None
-                    
+        elif task.task_type == DiffusionTaskType.VAEDecode:               
             task.buffer.generated_image = tokens  # 保存最终生成的图像
             if is_main_process:
                 logger.debug(f"Task {task.task_id} completed all stages")
@@ -558,10 +543,7 @@ class Generator:
         # 未知阶段
         else:
             if is_main_process:
-                if self.progress_bar:
-                    self.progress_bar.close()
                 logger.error(f"Unknown task type: {task.task_type}")
-            task.req.finish_reason = "error"
             task.status = DiffusionTaskStatus.Failed
             return False
         
