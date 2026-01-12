@@ -38,27 +38,7 @@ pip install -e .
 **System parameters** (parallelism, operators, acceleration algorithms, etc.) are set in the launch args of `Chitu`.
 
 Test script: `chitu/diffusion/test_generate.py`
-Single-card/Distributed launch: `bash run_wan_demo.sh <num_gpus>`
-
-```
-num_gpus=$1
-echo $PYTHONPATH
-export CHITU_DEBUG=1
-# export CUDA_LAUNCH_BLOCKING=1
-
-# Calculate cp_size and ensure the minimum value is 1
-cp_size=$((num_gpus/2))
-if [ $cp_size -eq 0 ]; then
-    cp_size=1
-fi
-
-# Please adjust accordingly
-# model="Wan2.1-T2V-1.3B"
-# ckpt_dir="/home/zhongrx/cyy/Wan2.1/Wan2.1-T2V-1.3B"
-
-./script/srun_multi_node.sh 1 $num_gpus ./chitu/diffusion/test_generate.py models=$model models.ckpt_dir=$ckpt_dir \
-    infer.diffusion.cp_size=$cp_size infer.diffusion.up_limit=2
-```
+Single-card/Distributed launch: `bash srun_wan_demo.sh <num_gpus>`
 
 ---
 
