@@ -438,14 +438,23 @@ class Generator:
         DiffusionBackend.switch_active_model(flush=True)
 
         # enable flexcache
-        if task.req.params.flexcache == "teacache":
-            from chitu_diffusion.flex_cache.strategy.teacache import TeaCacheStrategy
-            cache_strategy = TeaCacheStrategy(task=task)
-            DiffusionBackend.flexcache.set_strategy(cache_strategy)
-            # wrap model
-            DiffusionBackend.flexcache.strategy.wrap_module_with_strategy(DiffusionBackend.active_model)
-            logger.info("Teacache: Successfully wrapped models!")
+        if DiffusionBackend.flexcache is not None:
+            if task.req.params.flexcache == "teacache":
+                from chitu_diffusion.flex_cache.strategy.teacache import TeaCacheStrategy
+                cache_strategy = TeaCacheStrategy(task=task)
+                DiffusionBackend.flexcache.set_strategy(cache_strategy)
+                # wrap model
+                DiffusionBackend.flexcache.strategy.wrap_module_with_strategy(DiffusionBackend.active_model)
+                logger.info("Teacache: Successfully wrapped models!")
 
+        # enable ditango
+        if DiffusionBackend.args.infer.diffusion.enable_ditango:
+            from chitu_diffusion.modules.attention.ditango_attn_backend import Ditango_Attention
+            for layer_id, block in enumerate(DiffusionBackend.active_model.blocks):
+                block.self_attn.attn_func = Ditango_Attention(
+                    ulysses_limit=DiffusionBackend.args.infer.diffusion.up_limit,
+                    layer_id=layer_id
+                )
         # logger.info(f"[Pre Denoise] Init {latents.shape=} {timesteps=}")
 
 

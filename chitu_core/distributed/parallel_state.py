@@ -418,7 +418,7 @@ def initialize_diffusion_parallel_groups(
     initialize_world_group(rank, local_rank, world_size)
     initialize_cfg_group(cfg_size, rank, local_rank, world_size)
     initialize_cp_group(cp_size, cfg_size, rank, local_rank, world_size)
-    up_sizes = [up_limit] # TODO: More up sizes to support DiTango Support
+    up_sizes = [up_limit, up_limit // 2] # TODO: More up sizes to support DiTango Support
     initialize_up_groups(up_sizes, up_limit, cfg_size, rank, local_rank, world_size)
     
     # Debug logging

@@ -67,6 +67,7 @@ class DiffusionBackend:
     group_gloo = None
 
     # components
+    attn = None
     scheduler: Optional["DiffusionScheduler"] = None
 
     # mutable
@@ -479,12 +480,12 @@ class DiffusionBackend:
 
     @staticmethod
     def _init_attention_backend(args):
+        # TODO: sage attention and sparge attention
         attn = DiffusionAttnBackend()
+        DiffusionBackend.attn = attn
 
         if args.infer.diffusion.cp_size > 1:
             attn = DiffusionAttention_with_CP(attn, args.infer.diffusion.up_limit)
-        
-        DiffusionBackend.attn = attn
         return attn
     
     @staticmethod
@@ -597,6 +598,7 @@ class DiffusionBackend:
         DiffusionBackend.flexcache = DiffusionBackend._init_cache_manager(args)
 
         # Initialize attention backend
+        # FIXME: 这里的实现有点丑陋了, CP相关应该在wrap model with cp里面做？
         attn_backend = DiffusionBackend._init_attention_backend(args)
         rope_impl = DiffusionBackend._get_rope_implementation(args)
        
