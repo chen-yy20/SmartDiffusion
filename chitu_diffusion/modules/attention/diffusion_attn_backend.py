@@ -17,6 +17,19 @@ try:
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
 
+try:
+    import sageattention
+    from sageattention import sageattn,sageattn_varlen
+    SAGE_ATTENTION_AVAILABLE = True
+except ModuleNotFoundError:
+    SAGE_ATTENTION_AVAILABLE = False
+
+try:
+    import spas_sage_attn
+    from spas_sage_attn import spas_sage2_attn_meansim_topk_cuda
+    SPAS_SAGE_ATTN_AVAILABLE = True
+except ModuleNotFoundError:
+    SPAS_SAGE_ATTN_AVAILABLE = False
 
 logger = getLogger(__name__)
 class DiffusionAttnBackend:
@@ -26,7 +39,14 @@ class DiffusionAttnBackend:
     """
 
     def __init__(self) -> None:
-        if FLASH_ATTN_3_AVAILABLE:
+        if SPAS_SAGE_ATTN_AVAILABLE:
+            self.impl = "spas_sage"
+            self.topk = 0.5
+            logger.info("Using SPAS SAGE Attention as Diffusion attention backend.")
+        elif SAGE_ATTENTION_AVAILABLE:
+            self.impl = "sage"
+            logger.info("Using SAGE Attention as Diffusion attention backend.")
+        elif FLASH_ATTN_3_AVAILABLE:
             self.impl = "v3"
         elif FLASH_ATTN_2_AVAILABLE:
             self.impl = "v2"
@@ -60,7 +80,28 @@ class DiffusionAttnBackend:
         """
         use_varlen = cu_seqlens_q is not None
 
-        if self.impl == "v3":
+        if self.impl == "spas_sage":
+            return self._fwd_sparge(
+                q, k, v,
+                cu_seqlens_q, cu_seqlens_k,
+                max_seqlen_q, max_seqlen_k,
+                dropout_p, softmax_scale,
+                causal, window_size,
+                deterministic, return_attn_probs,
+                use_varlen,
+            )
+        elif self.impl == "sage":
+            return self._fwd_sage(
+                q, k, v,
+                cu_seqlens_q, cu_seqlens_k,
+                max_seqlen_q, max_seqlen_k,
+                dropout_p, softmax_scale,
+                causal, window_size,
+                deterministic, return_attn_probs,
+                use_varlen,
+            )
+
+        elif self.impl == "v3":
             return self._fwd_v3(
                 q, k, v,
                 cu_seqlens_q, cu_seqlens_k,
@@ -95,6 +136,47 @@ class DiffusionAttnBackend:
     ):
         # FIXME: support FA3
         pass
+    
+    def _fwd_sparge(
+        self,
+        q, k, v,
+        cu_seqlens_q, cu_seqlens_k,
+        max_seqlen_q, max_seqlen_k,
+        dropout_p, softmax_scale,
+        causal, window_size,
+        deterministic,
+        return_attn_probs,
+        use_varlen: bool,
+    ):
+        if use_varlen:
+            raise NotImplementedError("SPAS SAGE Attention does not support variable length sequences yet.")
+        
+        else:
+            out = spas_sage2_attn_meansim_topk_cuda(q, k, v, topk=self.topk, is_causal=causal,tensor_layout="NHD")
+       
+            
+        return out, None, None
+    
+    def _fwd_sage(
+        self,
+        q, k, v,
+        cu_seqlens_q, cu_seqlens_k,
+        max_seqlen_q, max_seqlen_k,
+        dropout_p, softmax_scale,
+        causal, window_size,
+        deterministic,
+        return_attn_probs,
+        use_varlen: bool,
+    ):
+        if use_varlen:
+            out = sageattn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, is_causal=causal,tensor_layout="NHD")
+        
+        else:
+            out = sageattn(q, k, v, is_causal=causal,tensor_layout="NHD")
+
+       
+            
+        return out, None, None
 
     # ------------- v2 分支 -------------
     def _fwd_v2(
