@@ -179,7 +179,7 @@ def compute_layer_dist_in_pipe(num_layers, world_size):
 
 
 def get_config_dir_path():
-    return str(importlib.resources.files("chitu") / "config")
+    return str(importlib.resources.files("chitu_core") / "config")
 
 
 def get_ascend_custom_opp_path():
