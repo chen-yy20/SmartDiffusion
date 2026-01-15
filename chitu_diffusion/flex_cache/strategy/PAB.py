@@ -7,6 +7,7 @@ from logging import getLogger
 from chitu_diffusion.flex_cache.flexcache_manager import FlexCacheStrategy
 from chitu_diffusion.task import DiffusionTask
 from chitu_diffusion.backend import DiffusionBackend, CFGType
+from chitu_core.distributed.parallel_state import get_cp_group
 
 logger = getLogger(__name__)
 is_main_process = dist.get_rank() == 0
@@ -40,6 +41,17 @@ class PABStrategy(FlexCacheStrategy):
         """
         super().__init__()
         self.type = 'PAB'
+        
+        # 获取并打印CP信息（所有rank都打印）
+        cp_group = get_cp_group()
+        cp_rank = cp_group.rank_in_group if cp_group.group_size > 1 else 0
+        cp_size = cp_group.group_size
+        global_rank = dist.get_rank()
+        
+       
+        print(f"[PAB Init] Global Rank {global_rank}: cp_size={cp_size}, cp_rank={cp_rank}, "
+              f"rank_list={cp_group.rank_list}")
+        logger.info(f"[PAB Init] Global Rank {global_rank}: cp_size={cp_size}, cp_rank={cp_rank}")
         
         # 步数管理
         self.num_steps = task.req.params.num_inference_steps
@@ -98,13 +110,17 @@ class PABStrategy(FlexCacheStrategy):
         Args:
             range: 复用间隔
         Returns:
-            缓存键 'neg' 或 'pos'，若不可复用则返回 None
+            缓存键 'neg_cpX' 或 'pos_cpX'，若不可复用则返回 None
         """
         # 从后端获取必要的信息
         is_pos = DiffusionBackend.cfg_type == CFGType.POS
         current_step = DiffusionBackend.generator.current_task.buffer.current_step
 
-        branch_key = 'pos' if is_pos else 'neg'
+        # 获取CP rank信息（如果有CP并行）
+        cp_group = get_cp_group()
+        cp_rank = cp_group.rank_in_group if cp_group.group_size > 1 else 0
+        
+        branch_key = f"{'pos' if is_pos else 'neg'}_cp{cp_rank}"
         
         # 在指定范围外，不使用缓存
         if current_step < self.begin_step or current_step >= self.end_step:
@@ -137,10 +153,15 @@ class PABStrategy(FlexCacheStrategy):
             **kwargs: 其他参数
             
         Returns:
-            存储键 'pos' 或 'neg'
+            存储键 'pos_cpX' 或 'neg_cpX'
         """
         is_pos = DiffusionBackend.cfg_type == CFGType.POS
-        return 'pos' if is_pos else 'neg'
+        
+        # 获取CP rank信息（如果有CP并行）
+        cp_group = get_cp_group()
+        cp_rank = cp_group.rank_in_group if cp_group.group_size > 1 else 0
+        
+        return f"{'pos' if is_pos else 'neg'}_cp{cp_rank}"
     
     def store(self, fresh_feature: torch.Tensor,
               **kwargs) -> torch.Tensor:
@@ -185,8 +206,9 @@ class PABStrategy(FlexCacheStrategy):
                     
                     if cache_key in DiffusionBackend.flexcache.cache:
                         cached_output = DiffusionBackend.flexcache.cache[cache_key]
-                        if is_main_process:
-                            logger.info(f"Get self-attn from {cache_key} and skip this step.")
+                        # 所有rank都打印读取信息（只在block 0）
+                        if block_idx == 0:
+                            print(f"[Rank {dist.get_rank()}] REUSE self-attn from key: {cache_key}, shape: {cached_output.shape}")
                         return self.reuse(cached_feature=cached_output)
                 
                 # 完整计算 - 使用捕获的原始函数
@@ -197,6 +219,9 @@ class PABStrategy(FlexCacheStrategy):
                 if store_key is not None:
                     cache_key = f"{store_key}_block{block_idx}_self"
                     DiffusionBackend.flexcache.cache[cache_key] = output
+                    # 所有rank都打印存储信息（只在block 0）
+                    if block_idx == 0:
+                        print(f"[Rank {dist.get_rank()}] STORE self-attn to key: {cache_key}, shape: {output.shape}")
                 
                 return output
             
@@ -222,8 +247,9 @@ class PABStrategy(FlexCacheStrategy):
                     
                     if cache_key in DiffusionBackend.flexcache.cache:
                         cached_output = DiffusionBackend.flexcache.cache[cache_key]
-                        if is_main_process:
-                            logger.info(f"Get cross-attn from {cache_key} and skip this step.")
+                        # 所有rank都打印读取信息（只在block 0）
+                        if block_idx == 0:
+                            print(f"[Rank {dist.get_rank()}] REUSE cross-attn from key: {cache_key}, shape: {cached_output.shape}")
                         return self.reuse(cached_feature=cached_output)
                 
                 # 完整计算 - 使用捕获的原始函数
@@ -234,6 +260,9 @@ class PABStrategy(FlexCacheStrategy):
                 if store_key is not None:
                     cache_key = f"{store_key}_block{block_idx}_cross"
                     DiffusionBackend.flexcache.cache[cache_key] = output
+                    # 所有rank都打印存储信息（只在block 0）
+                    if block_idx == 0:
+                        print(f"[Rank {dist.get_rank()}] STORE cross-attn to key: {cache_key}, shape: {output.shape}")
                 
                 return output
             

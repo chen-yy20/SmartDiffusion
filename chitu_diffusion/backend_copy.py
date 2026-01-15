@@ -359,13 +359,8 @@ class DiffusionBackend:
 
         # FIXME: a better cfg worldsize decision
         DiffusionBackend.do_cfg = all(x > 0 for x in args.models.sampler.guidance_scale)
-        #cfg_size = 2 if (world_size >= 2 and  DiffusionBackend.do_cfg) else 1
-        if hasattr(args.infer.diffusion, 'cfg_size') and args.infer.diffusion.cfg_size is not None:
-            cfg_size = args.infer.diffusion.cfg_size
-            logger.info(f"Using explicitly configured cfg_size={cfg_size}")
-        else:#默认行为:如果有CFG且有多GPU，自动启用CFG并行
-            cfg_size = 2 if (world_size >= 2 and DiffusionBackend.do_cfg) else 1
-            logger.info(f"Auto-determined cfg size={cfg_size} (world size-{world_size}, do_cfg={DiffusionBackend.do_cfg})")
+        cfg_size = 2 if (world_size >= 2 and  DiffusionBackend.do_cfg) else 1
+        
         up_limit = args.infer.diffusion.up_limit
         context_parallel_size = args.infer.diffusion.cp_size
 

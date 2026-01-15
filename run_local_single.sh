@@ -8,7 +8,7 @@
 set -e
 
 # 初始化变量
-num_gpus=${1:-2}
+num_gpus=${1:-1}
 script="./test/test_generate.py"
 
 # 显示PYTHONPATH用于调试
@@ -19,7 +19,7 @@ export CHITU_DEBUG=1
 # export CUDA_LAUNCH_BLOCKING=1  # 如需调试CUDA错误，取消注释此行
 
 # 计算context parallel size（序列并行度，最小值为1）
-cp_size=2
+cp_size=$((num_gpus/2))
 if [ $cp_size -eq 0 ]; then
     cp_size=1
 fi
@@ -115,9 +115,8 @@ fi
 
 # 参数配置
 basic_params="models=$model models.ckpt_dir=$ckpt_dir"
-# 纯CP并行：cp_size=2, 使用+添加cfg_size=1（不启用CFG并行）
-parallel_params="infer.diffusion.cp_size=$cp_size +infer.diffusion.cfg_size=1 infer.diffusion.up_limit=2"
-# cfg_params="models.sampler.guidance_scale=[7.5]"
+parallel_params="infer.diffusion.cp_size=$cp_size infer.diffusion.up_limit=2"
+
 # 可选的低显存模式参数（如果显存不足，可以取消注释）
 # magic_params="infer.diffusion.low_mem_level=1"
 
@@ -128,7 +127,7 @@ flexcache_params="infer.diffusion.enable_flexcache=true"
 # 构建并执行命令
 echo "=========================================="
 echo "执行命令:"
-echo "torchrun --nnodes=1 --nproc-per-node=$num_gpus --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT $script $basic_params $parallel_params $cfg_params $flexcache_params"
+echo "torchrun --nnodes=1 --nproc-per-node=$num_gpus --master_addr=$MASTER_ADDR --master_port=$MASTER_PORT $script $basic_params $parallel_params $flexcache_params"
 echo "=========================================="
 
 # 执行命令
@@ -141,5 +140,4 @@ torchrun \
     $basic_params \
     $parallel_params \
     $flexcache_params
-     # $cfg_params \
 
