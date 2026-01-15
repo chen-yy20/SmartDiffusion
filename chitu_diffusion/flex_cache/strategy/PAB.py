@@ -246,7 +246,7 @@ class PABStrategy(FlexCacheStrategy):
         恢复模块的原始forward方法
         
         Args:
-            module: 要恢复的PyTorch模块（WanModel）
+            module: 要恢复的PyTorch模块
         """
         # 遍历所有 blocks，恢复 attention 的原始 forward
         for block in module.blocks:
