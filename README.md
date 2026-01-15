@@ -21,6 +21,38 @@ pip install -e .
 ```
 
 > Flash Attention建议用wheel安装：https://github.com/Dao-AILab/flash-attention/releases/tag/v2.7.1.post2
+### Using uv to set up environment
+```bash
+git clone git@github.com:chen-yy20/SmartDiffusion.git
+git submodule update --init --recursive
+```
+
+推荐使用`uv`来管理环境，`uv`是一个轻量级的Python虚拟环境管理工具，类似于`virtualenv`和`conda`。
+安装`uv`: https://docs.astral.sh/uv/getting-started/installation/
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+
+更改`pyproject.toml`中的`[tool.uv.extra-build-variables]`；
+指定`TORCH_CUDA_ARCH_LIST`为只编译需要的计算架构的算子；
+flash_attn默认将从github源仓库拉取二进制包，如遇到网络/编译问题，可取消下面的注释，从源码编译（64核 256G内存 约10min）。
+```toml
+[tool.uv.extra-build-variables]
+# flash_attn = { FLASH_ATTN_CUDA_ARCHS = "80",FLASH_ATTENTION_FORCE_BUILD = "TRUE" }
+sageattention = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
+spas_sage_attn = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
+```
+
+一键安装依赖：
+
+```bash
+# 仅安装flash_attn
+# uv sync -v 2>&1 | tee uv_sync.log
+# 安装sparge attn和flash_attn，并自动启用
+uv sync -v --all-extras 2>&1 | tee build.log 
+```
+
 
 ## Model Checkpoint
 > Supported model-ids:
