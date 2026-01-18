@@ -447,7 +447,13 @@ class Generator:
             logger.info("Teacache: Successfully wrapped models!")
 
         # logger.info(f"[Pre Denoise] Init {latents.shape=} {timesteps=}")
-
+        if task.req.params.flexcache == "PAB":
+            from chitu_diffusion.flex_cache.strategy.PAB import PABStrategy
+            cache_strategy = PABStrategy(task=task)
+            DiffusionBackend.flexcache.set_strategy(cache_strategy)
+            # wrap model
+            DiffusionBackend.flexcache.strategy.wrap_module_with_strategy(DiffusionBackend.active_model)
+            logger.info("PAB: Successfully wrapped models!")
 
     def _update_task_stage_and_buffer(self, task: DiffusionTask, tokens: torch.Tensor):
 
