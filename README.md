@@ -23,6 +23,46 @@ pip install -e .
 
 > Flash Attention is recommended to be installed via wheel: https://github.com/Dao-AILab/flash-attention/releases/tag/v2.7.1.post2 
 
+### Using uv to setup environment
+Recommend use `uv` to setup the environment for a smoother experience.
+#### Clone the repo and sparge/sage attn submodules
+```bash
+git clone git@github.com:chen-yy20/SmartDiffusion.git
+git submodule update --init --recursive
+```
+
+#### Install `uv` 
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+doc : https://docs.astral.sh/uv/getting-started/installation/
+
+#### Specify build recipes
+change the `[tool.uv.extra-build-variables]` item in `pyproject.toml`:
+- Specify `TORCH_CUDA_ARCH_LIST` to compile kernels only for the required computational architectures.
+- flash_attn defaults to pulling binary packages from the GitHub source repository, f you encounter network/symbol_link issues, you can uncomment the following to compile from source (32-core, 256GB memory, about 10 minutes).
+
+```toml
+[tool.uv.extra-build-variables]
+# flash_attn = { FLASH_ATTN_CUDA_ARCHS = "80",FLASH_ATTENTION_FORCE_BUILD = "TRUE" }
+sageattention = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
+spas_sage_attn = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
+```
+
+#### One-click dependency installation
+
+```bash
+# only install flash_attn
+# uv sync -v 2>&1 | tee uv_sync.log
+
+# install sparge attn and sage attn for quantized attention speedup.
+# compile time is ~10min for 32core, 256GB memory
+uv sync -v --all-extras 2>&1 | tee build.log 
+```
+
+
+
+
 ## Model Checkpoint
 > Supported model-ids:
 > * Wan-AI/Wan2.1-T2V-1.3B
