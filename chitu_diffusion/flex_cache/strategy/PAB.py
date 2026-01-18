@@ -27,15 +27,15 @@ class PABStrategy(FlexCacheStrategy):
         self,
         task: DiffusionTask,
         # PAB 专用参数
-        begin_step: int = None,
-        end_step: int = None,
+        warmup_steps: int = None,
+        cooldown_steps: int = None,
         skip_self_range: int = None,
         skip_cross_range: int = None
     ):
         """
         Args:
-            begin_step: 开始PAB的step
-            end_step: 结束PAB的step
+            warmup_steps: 开始PAB的step
+            cooldown_steps: 结束PAB的step
             skip_self_range: self_attn复用的间隔
             skip_cross_range: cross_attn复用的间隔
         """
@@ -58,16 +58,16 @@ class PABStrategy(FlexCacheStrategy):
         self.self_broadcast = True 
         self.cross_broadcast = True # 固定使用self和cross都broadcast
           
-        # 自动设置参数（会设置 begin_step, end_step, skip_self_range 等）
-        self._setup_PAB(begin_step, end_step, skip_self_range, skip_cross_range)
+        # 自动设置参数（会设置 warmup_steps, cooldown_steps, skip_self_range 等）
+        self._setup_PAB(warmup_steps, cooldown_steps, skip_self_range, skip_cross_range)
         
         # 在参数设置后计算 tradeoff_score
-        self.tradeoff_score = (self.end_step - self.begin_step) / self.skip_self_range
+        self.tradeoff_score = (self.cooldown_steps - self.warmup_steps) / self.skip_self_range
         
     def _setup_PAB(
         self, 
-        begin_step: int = None,
-        end_step: int = None,
+        warmup_steps: int = None,
+        cooldown_steps: int = None,
         skip_self_range: int = None,
         skip_cross_range: int = None
     ):
@@ -75,19 +75,19 @@ class PABStrategy(FlexCacheStrategy):
         根据模型类型和任务类型自动配置PAB参数
         
         Args:
-            begin_step: 自定义开始step，若为None则自动选择
-            end_step: 自定义结束step，若为None则自动设置
+            warmup_steps: 自定义开始step，若为None则自动选择
+            cooldown_steps: 自定义结束step，若为None则自动设置
             skip_self_range: 自定义self_attn复用的间隔，若为None则自动设置
             skip_cross_range: 自定义cross_attn复用的间隔，若为None则自动设置
         """
-        if begin_step is not None:
-            self.begin_step = begin_step
+        if warmup_steps is not None:
+            self.warmup_steps = warmup_steps
         else:
-            self.begin_step = 5
-        if end_step is not None:
-            self.end_step = end_step
+            self.warmup_steps = 5
+        if cooldown_steps is not None:
+            self.cooldown_steps = cooldown_steps
         else:
-            self.end_step = self.num_steps - 5
+            self.cooldown_steps = self.num_steps - 5
         if skip_self_range is not None:
             self.skip_self_range = skip_self_range
         else:
@@ -99,7 +99,7 @@ class PABStrategy(FlexCacheStrategy):
         
         model_name = DiffusionBackend.args.models.name
         logger.info(f"[PAB setup] model={model_name}, "
-                   f"begin_step={self.begin_step}, end_step={self.end_step}, "
+                   f"warmup_steps={self.warmup_steps}, cooldown_steps={self.cooldown_steps}, "
                    f"skip_self_range={self.skip_self_range}, skip_cross_range={self.skip_cross_range}")
         
         
@@ -123,9 +123,9 @@ class PABStrategy(FlexCacheStrategy):
         branch_key = f"{'pos' if is_pos else 'neg'}_cp{cp_rank}"
         
         # 在指定范围外，不使用缓存
-        if current_step < self.begin_step or current_step >= self.end_step:
+        if current_step < self.warmup_steps or current_step >= self.cooldown_steps:
             return None
-        elif (current_step - self.begin_step) % range == 0:
+        elif (current_step - self.warmup_steps) % range == 0:
             return None  # 该步需要重新计算
         else: 
             return branch_key  # 可以复用
