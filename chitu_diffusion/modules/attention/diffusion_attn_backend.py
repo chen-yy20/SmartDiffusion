@@ -34,25 +34,41 @@ except ModuleNotFoundError:
 logger = getLogger(__name__)
 class DiffusionAttnBackend:
     """
-    统一 flash-attn v2/v3 的调用入口。
-    优先用 v3，v3 不存在再降级到 v2。
+    Unified backend for different attention implementations.
+    Priority order:
+    1. User specified attention type (if available)
+    2. Fallback to Flash Attention v3/v2 as default
+    
+    Supported types:
+    - flash: Flash Attention (v3/v2)
+    - sage: SAGE Attention
+    - sparse: Sparse SAGE Attention
     """
 
-    def __init__(self) -> None:
-        if SPAS_SAGE_ATTN_AVAILABLE:
-            self.impl = "spas_sage"
-            self.topk = 0.5
-            logger.info("Using SPAS SAGE Attention as Diffusion attention backend.")
-        elif SAGE_ATTENTION_AVAILABLE:
+    def __init__(self, attn_type: str = "auto") -> None:
+        self.impl = None
+        
+        # Try user specified attention type first
+        if attn_type in ["sparge", "auto"] and SPAS_SAGE_ATTN_AVAILABLE:
+            self.impl = "sparge"
+            self.topk = 0.5  # Sparsity ratio
+        elif attn_type in ["sage", "auto"] and SAGE_ATTENTION_AVAILABLE:
             self.impl = "sage"
-            logger.info("Using SAGE Attention as Diffusion attention backend.")
-        elif FLASH_ATTN_3_AVAILABLE:
-            self.impl = "v3"
-        elif FLASH_ATTN_2_AVAILABLE:
-            self.impl = "v2"
-        else:
-            raise RuntimeError("Neither flash-attn v2 nor v3 found.")
-        logger.info(f"Using Flash Attention {self.impl} as Diffusion attention backend.")
+        
+        # Fallback to Flash Attention if user specified type is unavailable
+        # or flash attention is explicitly requested
+        if self.impl is None:
+            if FLASH_ATTN_3_AVAILABLE:
+                self.impl = "flash_v3"
+            elif FLASH_ATTN_2_AVAILABLE:
+                self.impl = "flash_v2"
+            else:
+                raise RuntimeError(
+                    "No attention implementation available. "
+                    "Please install Flash Attention, SAGE Attention, or Sparse SAGE Attention."
+                )
+        
+        logger.info(f"Using {self.impl} attention backend")
 
     # ------------- 统一入口 -------------
     def __call__(

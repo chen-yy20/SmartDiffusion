@@ -479,7 +479,8 @@ class DiffusionBackend:
 
     @staticmethod
     def _init_attention_backend(args):
-        attn = DiffusionAttnBackend()
+        attn_type = args.infer.attn_type
+        attn = DiffusionAttnBackend(attn_type)
 
         if args.infer.diffusion.cp_size > 1:
             attn = DiffusionAttention_with_CP(attn, args.infer.diffusion.up_limit)

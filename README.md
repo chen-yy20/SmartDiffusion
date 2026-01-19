@@ -45,8 +45,9 @@ change the `[tool.uv.extra-build-variables]` item in `pyproject.toml`:
 ```toml
 [tool.uv.extra-build-variables]
 # flash_attn = { FLASH_ATTN_CUDA_ARCHS = "80",FLASH_ATTENTION_FORCE_BUILD = "TRUE" }
-sageattention = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
-spas_sage_attn = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
+## Set "TORCH_CUDA_ARCH_LIST" according to your GPU architecture (e.g. Ampere: 8.0 / Hopper: 9.0)
+sageattention = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "9.0"}
+spas_sage_attn = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "9.0"}
 ```
 
 #### One-click dependency installation
@@ -82,7 +83,23 @@ Single-card/Distributed launch: `bash srun_wan_demo.sh <num_gpus>`
 
 ---
 
-# Magic Parameters Explained
+# Magic Parameters!!!
+
+## `infer.attn_type`
+
+**Select your diffusion backend**: This parameter controls your attention backend. Diffusion attention is usually 3D-full attention with long context, resulting in high compute overcome due to $O(n^2)$ complexity. We provide smarter attention implementation to reduce attention overhead.
+
+### Attention Type Description
+
+| attn-type | Description | Performance |
+|-------|-------------|-------|
+| **flash_attn** | Default attention implementation. High-performance full attention kernel without accuracy loss. | To be tested. |
+| [**sage (NIPS25 spotlight)**](https://github.com/thu-ml/SageAttention) | Train-free quantized attention implementation. | To be tested. |
+| [**sparge (ICML25)**](https://github.com/thu-ml/SpargeAttn) | Train-free sparse attention based on sage-attention.  | To be tested. |
+| **auto** | Automatically choosing best attention backend. | - |
+
+---
+
 
 ## `infer.diffusion.low_mem_level`
 

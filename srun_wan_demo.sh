@@ -78,7 +78,9 @@ basic_params="models=$model models.ckpt_dir=$ckpt_dir"
 parallel_params="infer.diffusion.cp_size=$cp_size infer.diffusion.up_limit=2"
 
 # 魔法参数！
-magic_params="infer.diffusion.low_mem_level=1 \
+magic_params="
+            infer.attn_type='sage' \
+            infer.diffusion.low_mem_level=1 \
             infer.diffusion.enable_flexcache=true"
 
 # Build and execute command
