@@ -70,11 +70,12 @@ Set in the launch script: `infer.diffusion.enable_flexcache=true` and set the co
 
 Currently supports:
 
-| Method | cache_type |
-|-------|-------------|
+| Method | cache_type | Performance |
+|-------|-------------| ---------|
 | 
-[Teacache](https://github.com/ali-vilab/TeaCache)(CVPR24-spotlight) | `teacache` |
-| [Pyramid Attention Broadcast](https://oahzxl.github.io/PAB/)(ICLR25) | `PAB` |
+| `teacache` |[Teacache](https://github.com/ali-vilab/TeaCache)(CVPR24-spotlight) | to be tested. |
+| `PAB` | [Pyramid Attention Broadcast](https://oahzxl.github.io/PAB/)(ICLR25) | to be tested. |
+---
 
 
 You can set `flexcache` in `DiffusionUserParams` as follows:
