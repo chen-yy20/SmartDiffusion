@@ -106,3 +106,4 @@ log/*
 # Diffusion
 *.mp4
 output/*
+srun_wan_demo.sh

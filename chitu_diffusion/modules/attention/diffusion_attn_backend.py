@@ -168,6 +168,9 @@ class DiffusionAttnBackend:
             raise NotImplementedError("SPAS SAGE Attention does not support variable length sequences yet.")
         
         else:
+            if return_attn_probs:
+                logger.warning("[Not implemented] Sparge Attention varlen does not support 'return_attn_probs', which may cause error in context parallelism.")
+
             out = spas_sage2_attn_meansim_topk_cuda(q, k, v, topk=self.topk, is_causal=causal,tensor_layout="NHD")
        
             
@@ -185,14 +188,21 @@ class DiffusionAttnBackend:
         use_varlen: bool,
     ):
         if use_varlen:
+            if return_attn_probs:
+                logger.warning("[Not implemented] Sage Attention varlen does not support 'return_attn_probs', which may cause error in context parallelism.")
             out = sageattn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, is_causal=causal,tensor_layout="NHD")
+            lse = None
         
         else:
-            out = sageattn(q, k, v, is_causal=causal,tensor_layout="NHD")
+            if return_attn_probs:
+                out, lse = sageattn(q, k, v, is_causal=causal,tensor_layout="NHD", return_lse=return_attn_probs)
+            else:
+                out = sageattn(q, k, v, is_causal=causal,tensor_layout="NHD", return_lse=return_attn_probs)
+                lse = None
 
        
             
-        return out, None, None
+        return out, lse, None
 
     # ------------- v2 分支 -------------
     def _fwd_v2(

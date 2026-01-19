@@ -118,19 +118,29 @@ Single-card/Distributed launch: `bash srun_wan_demo.sh <num_gpus>`
 
 By properly setting `infer.diffusion.low_mem_level`, you can flexibly adjust the model loading strategy according to the available GPU memory, ensuring efficient operation of the model with limited resources.
 
-## `infer.diffusion.enable_flexcache` [Trial]
+## `infer.diffusion.enable_flexcache`
 
 **Enable FlexCache**: The Diffusion backend initializes the FlexCache Manager, which uniformly supports lossy acceleration algorithms based on Feature Reuse.
 
 ### Parameter Description
 Set in the launch script: `infer.diffusion.enable_flexcache=true` and set the corresponding user parameters.
 
-Currently supports [Teacache](https://github.com/ali-vilab/TeaCache). You can set `flexcache` in `DiffusionUserParams` as follows:
+Currently supports:
+
+| Method | cache_type | Performance |
+|-------|-------------| ---------|
+| 
+| `teacache` |[Teacache](https://github.com/ali-vilab/TeaCache)(CVPR24-spotlight) | to be tested. |
+| `PAB` | [Pyramid Attention Broadcast](https://oahzxl.github.io/PAB/)(ICLR25) | to be tested. |
+---
+
+
+You can set `flexcache` in `DiffusionUserParams` as follows:
 ```
 DiffusionUserParams(
     role="Alex",
     prompt="A cat walking on grass.",
     ...
-    flexcache='teacache',
+    flexcache='<cache_type>',
 )
 ```

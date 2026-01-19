@@ -75,11 +75,11 @@ select_model
 basic_params="models=$model models.ckpt_dir=$ckpt_dir"
 
 # 并行参数（根据GPU数自动设置）
-parallel_params="infer.diffusion.cp_size=$cp_size infer.diffusion.up_limit=2"
+parallel_params="infer.diffusion.cp_size=$cp_size infer.diffusion.up_limit=8"
 
 # 魔法参数！
 magic_params="
-            infer.attn_type='sage' \
+            infer.attn_type='sparge' \
             infer.diffusion.low_mem_level=1 \
             infer.diffusion.enable_flexcache=true"
 
