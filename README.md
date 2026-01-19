@@ -94,8 +94,8 @@ Single-card/Distributed launch: `bash srun_wan_demo.sh <num_gpus>`
 | attn-type | Description | Performance |
 |-------|-------------|-------|
 | **flash_attn** | Default attention implementation. High-performance full attention kernel without accuracy loss. | To be tested. |
-| [**sage (NIPS25 spotlight)**](https://github.com/thu-ml/SageAttention) | Train-free quantized attention implementation. | To be tested. |
-| [**sparge (ICML25)**](https://github.com/thu-ml/SpargeAttn) | Train-free sparse attention based on sage-attention.  | To be tested. |
+| [**sage**](https://github.com/thu-ml/SageAttention)|(NIPS25 spotlight) Train-free quantized attention implementation. | To be tested. |
+| [**sparge**](https://github.com/thu-ml/SpargeAttn) |  (ICML25)Train-free sparse attention based on sage-attention.  | To be tested. |
 | **auto** | Automatically choosing best attention backend. | - |
 
 ---
@@ -129,7 +129,6 @@ Currently supports:
 
 | Method | cache_type | Performance |
 |-------|-------------| ---------|
-| 
 | `teacache` |[Teacache](https://github.com/ali-vilab/TeaCache)(CVPR24-spotlight) | to be tested. |
 | `PAB` | [Pyramid Attention Broadcast](https://oahzxl.github.io/PAB/)(ICLR25) | to be tested. |
 ---
