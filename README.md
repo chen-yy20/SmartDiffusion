@@ -38,7 +38,32 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 doc : https://docs.astral.sh/uv/getting-started/installation/
 
 #### Specify build recipes
-change the `[tool.uv.extra-build-variables]` item in `pyproject.toml`:
+The build process uses cuda, so load cuda with its version in mind.
+```sh
+nvcc --version
+## load cuda if not exist
+spack load cuda@12.8
+```
+
+Specify the above loaded cuda version for torch, flash_attn, sage_attn, sparge_attn, take cuda@12.8 as an example:
+```toml
+# set the right source index for torch
+# A torch package built with specified cuda version shpuld be pulled from torch's channel, which uses the url cu[xxx] to specify the cuda version built with.
+# so we use tool.uv.index to inform uv of this information
+# see more : https://docs.astral.sh/uv/guides/integration/pytorch/
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+## specify tool.uv.sources to use the above channel defined for installing torch and torchvison package
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+```
+
+Specify the `[tool.uv.extra-build-variables]` item in `pyproject.toml`:
 - Specify `TORCH_CUDA_ARCH_LIST` to compile kernels only for the required computational architectures.
 - flash_attn defaults to pulling binary packages from the GitHub source repository, if you encounter network/symbol_link issues, you can uncomment the following to compile from source (32-core, 256GB memory, about 10 minutes).
 
