@@ -22,6 +22,7 @@ from chitu_diffusion.utils.kv_capture import WanKVCaptureWriter
 
 
 from chitu_diffusion.flex_cache.flexcache_manager import FlexCacheManager
+from chitu_diffusion.bench import Timer
 # from chitu_diffusion.flex_cache.strategy.FPPCache import FPPCache
 
 
@@ -157,8 +158,9 @@ class WanSelfAttention(nn.Module):
         self.norm_k = WanRMSNorm(dim, eps=eps) if qk_norm else nn.Identity()
         self.rope_impl = rope_impl or rope_apply
 
+    
 
-    def forward(self, x, grid_sizes, freqs, save_cache=False, position_idx=None, cache_manager = None, layer_idx = None, kv_capture_writer=None, kv_capture_ctx=None, pp_rank=None):
+    def forward(self, x, grid_sizes, freqs, position_idx=None, patch_idx=None, save_cache=False, init_cache=False, cache_manager = None, layer_idx = None):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
@@ -175,29 +177,27 @@ class WanSelfAttention(nn.Module):
             v = self.v(x).view(b, s, n, d)
             return q, k, v
 
-        from chitu_diffusion.bench import Timer
-        with Timer.get_timer(f"qkv_fn, shape: {x.shape}"):
-            q, k, v = qkv_fn(x)
+        # with Timer.get_timer(f"qkv_fn, shape: {x.shape}"):
+        q, k, v = qkv_fn(x)
 
-        with Timer.get_timer(f"rope_impl, shape: {q.shape}"):
-            if position_idx is not None:
-                rope_q = self.rope_impl(q, grid_sizes, freqs, position_idx)
-                rope_k = self.rope_impl(k, grid_sizes, freqs, position_idx)
-            else:
-                from chitu_diffusion.modules.rope.diffusion_rope_backend import naive_rope_apply
-                rope_q = naive_rope_apply(q, grid_sizes, freqs)
-                rope_k = naive_rope_apply(k, grid_sizes, freqs)
-            ## should save cache here
-            if save_cache:
+        # with Timer.get_timer(f"rope_impl, shape: {q.shape}"):
+        if  position_idx is not None:
+            rope_q = self.rope_impl(q, grid_sizes, freqs, position_idx)
+            rope_k = self.rope_impl(k, grid_sizes, freqs, position_idx)
+        else:
+            rope_q = self.rope_impl(q, grid_sizes, freqs)
+            rope_k = self.rope_impl(k, grid_sizes, freqs)
+        ## should save cache here
+        if save_cache or init_cache:
 
-                rope_k, v = half(rope_k), half(v)
-                from chitu_diffusion.flex_cache.strategy.FPPCache import FPPCache
-                cache_manager : FPPCache
-                if position_idx is None:
-                    cache_manager.init_layer_stale_kv(rope_k, v, layer_idx)
-                else:
-                    # print(f"Updating cache for layer {layer_idx}, position_idx {position_idx}, rope_k shape {rope_k.shape}, v shape {v.shape}")
-                    rope_k, v = cache_manager.update_layer_stale_kv_patch(rope_k, v, layer_idx, (position_idx, position_idx + s))
+            rope_k, v = half(rope_k), half(v)
+            from chitu_diffusion.flex_cache.strategy.FPPCache import FPPCache
+            cache_manager : FPPCache
+            if init_cache:
+                cache_manager.init_layer_stale_kv(rope_k, v, layer_idx)
+            elif save_cache:
+                # print(f"Updating cache for layer {layer_idx}, position_idx {position_idx}, rope_k shape {rope_k.shape}, v shape {v.shape}")
+                rope_k, v = cache_manager.update_layer_stale_kv_patch(rope_k, v, layer_idx, (position_idx, position_idx + s))
 
         # if (
         #     kv_capture_ctx is not None
@@ -219,13 +219,13 @@ class WanSelfAttention(nn.Module):
         #         pp_rank=pp_rank,
         #     )
 
-        with Timer.get_timer(f"attn_func, shape: {rope_q.shape}"):
-            x = self.attn_func(
-                q = half(rope_q),
-                k = half(rope_k),
-                v = half(v),
-                window_size=self.window_size,
-            )[0]
+        # with Timer.get_timer(f"attn_func, shape: {rope_q.shape}"):
+        x = self.attn_func(
+            q = half(rope_q),
+            k = half(rope_k),
+            v = half(v),
+            window_size=self.window_size,
+        )[0]
         x = x.to(q.dtype)
 
         # output
@@ -361,13 +361,13 @@ class WanAttentionBlock(nn.Module):
         grid_sizes,
         freqs,
         context_lens=None,
-        save_cache=False,
         position_idx=None,
+        patch_idx=None,
+        save_cache=False,
+        init_cache=False,
         cache_manager = None,
         layer_idx = None,
-        kv_capture_writer=None,
-        kv_capture_ctx=None,
-        pp_rank=None,
+        
     ):
         r"""
         Args:
@@ -377,15 +377,15 @@ class WanAttentionBlock(nn.Module):
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
-        assert e.dtype == torch.float32
+        # assert e.dtype == torch.float32
         with amp.autocast(device_type="cuda", dtype=torch.float32):
             e = (self.modulation + e).chunk(6, dim=1)
-        assert e[0].dtype == torch.float32
+        # assert e[0].dtype == torch.float32
 
         # self-attention
         y = self.self_attn(
             self.norm1(x).float() * (1 + e[1]) + e[0], grid_sizes,
-            freqs, save_cache, position_idx, cache_manager, layer_idx, kv_capture_writer, kv_capture_ctx, pp_rank)
+            freqs, position_idx, patch_idx, save_cache, init_cache, cache_manager, layer_idx)
         
         with amp.autocast(device_type="cuda", dtype=torch.float32):
             x = x + y * e[2]
@@ -613,7 +613,7 @@ class WanModel(ModelMixin, ConfigMixin):
         import time
         print(f"[{time.strftime('%H:%M:%S.%f')}] Rank {self.pp_rank}: {msg}", flush=True)
 
-    def model_compute(self, tokens, time_proj, context_embedding, grid_sizes,  context_lens=None, save_cache=False, position_idx=None):
+    def model_compute(self, tokens, time_proj, context_embedding, grid_sizes, context_lens=None, position_idx=None, patch_idx=None, save_cache=False, init_cache=False):
         """
         主计算负载：通过所有transformer blocks处理tokens
         这是计算密集的核心部分，适合分布式处理
@@ -633,8 +633,8 @@ class WanModel(ModelMixin, ConfigMixin):
         x = tokens
         
         for i, block in enumerate(self.blocks):
-            from chitu_diffusion.bench import Timer
-            # with Timer.get_timer(f"model_compute_layer_{i}, shape: {x.shape}"):
+            # from chitu_diffusion.bench import Timer
+            # with Timer.get_timer(f"model_compute_layer_{i}, shape: {tokens.shape}"):
             # print(f"model_compute: cache_manager = {self.cache_manager}, strategy = {self.cache_manager.strategy}, layer_idx={i}")
             x = block(
                 x,
@@ -643,18 +643,15 @@ class WanModel(ModelMixin, ConfigMixin):
                 grid_sizes,
                 self.freqs,
                 context_lens,
-                save_cache=save_cache,
                 position_idx=position_idx,
+                patch_idx=patch_idx,
+                save_cache=save_cache,
+                init_cache=init_cache,
                 cache_manager=self.cache_manager.strategy,
                 layer_idx=i,
-                kv_capture_writer=self.kv_capture_writer,
-                kv_capture_ctx=self.kv_capture_ctx,
-                pp_rank=getattr(self, "pp_rank", None),
             )
         return x
 
-    
-    
 
     def _cal_patch_embedding(self, x, seq_len, y=None) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -761,7 +758,7 @@ class WanModel(ModelMixin, ConfigMixin):
         context_embedding = self._cal_context_embeddings(context, clip_fea)
 
 
-        tokens = self.model_compute(tokens, time_proj, context_embedding, grid_sizes, save_cache=save_cache, position_idx=position_idx)
+        tokens = self.model_compute(tokens, time_proj=time_proj, context_embedding=context_embedding, grid_sizes=grid_sizes, save_cache=save_cache, position_idx=position_idx)
 
         if save_cache:
             self.cache_manager.strategy.init_stale_tokens(tokens)
@@ -773,54 +770,6 @@ class WanModel(ModelMixin, ConfigMixin):
 
 
     
-    def sync_pipe_forward(self, latent, t, context, seq_len, clip_fea=None, y=None, save_cache=False):
-        """
-        同步管道前向传播：在每个阶段之间进行同步，适用于分布式环境
-        """
-        tokens = self._cal_patch_embedding(latent, seq_len, y)
-        grid_sizes = self._cal_grid_sizes(latent.shape)  # [1,3]
-        time_proj = self._cal_timeproj(t)
-        context_embedding = self._cal_context_embeddings(context, clip_fea)
-        
-        if not self.fpp_group.is_first_rank: 
-            
-            tokens = self.fpp_group.p2p_irecv(tokens.shape, torch.float32, self.fpp_group.prev_rank,tag=5)
-            self.fpp_group.p2p_commit()
-            self.fpp_group.p2p_wait()
-
-        tokens = self.model_compute(tokens, time_proj, context_embedding, grid_sizes, save_cache=save_cache)
-
-        if not self.fpp_group.is_last_rank:
-            # print(f"dtype before send: {tokens.dtype}")
-
-            self.fpp_group.p2p_isend(tokens.to(torch.float32), self.fpp_group.next_rank,tag=5)
-            self.fpp_group.p2p_commit()
-            self.fpp_group.p2p_wait()
-            return None 
-
-        if self.fpp_group.is_last_rank:
-            from chitu_diffusion.flex_cache.strategy.FPPCache import FPPCache
-            cache_strategy : FPPCache = self.cache_manager.strategy 
-
-            if save_cache:
-                cache_strategy.init_stale_tokens(tokens)
-            if self.kv_capture_writer is not None and self.kv_capture_ctx is not None:
-                
-                from chitu_diffusion.backend import CFGType, DiffusionBackend
-                # print(f"Rank {self.pp_rank}: capturing final tokens", flush=True)
-                self.kv_capture_writer.capture_latents(
-                    latents=tokens,
-                    noise_step=self.kv_capture_ctx.noise_step,
-                    is_pos=DiffusionBackend.cfg_type == CFGType.POS,
-                    patch_idx=self.kv_capture_ctx.patch_idx,
-                    pp_rank=self.pp_rank,
-                )
-            # print(f"Rank {self.pp_rank}: saved_stale_tokens", flush=True)
-
-            time_embedding = self._cal_time_embeddings(t)
-            latents = self._post_dit(tokens, time_embedding, grid_sizes)
-            return latents[0].to(torch.float32)
-
     def unpatchify(self, x, grid_sizes):
         r"""
         Reconstruct video tensors from patch embeddings.

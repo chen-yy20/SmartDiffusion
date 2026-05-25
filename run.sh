@@ -99,6 +99,7 @@ values = {
     "MODEL_CKPT_DIR": str(get("model.ckpt_dir", "")),
     "CFP": int(get("parallel.cfp", 1)),
     "FPP_SIZE": int(get("parallel.fpp_size", 1)),
+    "PATCH_NUM": int(get("parallel.patch_num", 7)),
     "CP_SIZE": int(get("parallel.cp_size", 1)),
     "UP_LIMIT": int(get("infer.up_limit", 8)),
     "ATTN_TYPE": str(get("infer.attn_type", "flash_attn")),
@@ -261,6 +262,7 @@ BASE_OVERRIDES=(
     "infer.diffusion.cfg_size=$CFP"
     "infer.diffusion.cp_size=$CP_SIZE"
     "infer.diffusion.fpp_size=$FPP_SIZE"
+    "infer.diffusion.patch_num=$PATCH_NUM"
     "infer.diffusion.up_limit=$UP_LIMIT"
     "infer.attn_type=$ATTN_TYPE"
     "infer.diffusion.low_mem_level=$LOW_MEM_LEVEL"

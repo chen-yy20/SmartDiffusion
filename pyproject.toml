@@ -33,8 +33,7 @@ dependencies = [
     "uvicorn[standard]",
     "netifaces",
     "flash_attn",
-    "pandas"
-
+    "pandas",
 ]
 
 [build-system]
@@ -48,15 +47,9 @@ url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
-explicit = true
-
-[[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
-
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
@@ -72,10 +65,10 @@ default = true
 # Switch to your cuda version
 torch = { index = "pytorch-cu124" }
 torchvision = { index = "pytorch-cu124" }
-sageattention = { git = "https://github.com/thu-ml/SageAttention.git" }
+# sageattention = { git = "https://github.com/thu-ml/SageAttention.git" }
+sageattention = { workspace = true }
 spas_sage_attn = { workspace = true }
 vbench = { workspace = true }
-
 
 
 [tool.uv.extra-build-dependencies]
@@ -85,13 +78,13 @@ spas_sage_attn = ["torch==2.6.0"]
 
 [tool.uv.extra-build-variables]
 flash_attn     = { FLASH_ATTENTION_FORCE_BUILD = "TRUE", MAX_JOBS="8", FLASH_ATTN_CUDA_ARCHS = "80" }
-sageattention  = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
+sageattention  = { EXT_PARALLEL= "8", NVCC_APPEND_FLAGS="--threads 4", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
 spas_sage_attn = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS="32", "TORCH_CUDA_ARCH_LIST" = "8.0"}
 
 
 
 [tool.uv]
-# config-settings = { editable_mode = "compat" }
+config-settings = { editable_mode = "compat" }
 # no-build-isolation-package = ["sageattention", "spas_sage_attn"]
 # reinstall-package = ["spas_sage_attn"]
 # [dependency-groups]
@@ -99,6 +92,8 @@ spas_sage_attn = { EXT_PARALLEL= "4", NVCC_APPEND_FLAGS="--threads 8", MAX_JOBS=
 #     "torch==2.6.0",
 #     "flash_attn",
 # ]
+
+
 [project.optional-dependencies]
 eval = [
     "lpips==0.1.4",
@@ -113,6 +108,7 @@ vbench = ["vbench"]
 [tool.uv.workspace]
 members = [
     "third_party/vbench",
-    "third_party/sparge_attn"
+    "third_party/sparge_attn",
+    "third_party/sage_attn",
 ]
 

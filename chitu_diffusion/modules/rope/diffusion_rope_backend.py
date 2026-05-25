@@ -84,7 +84,7 @@ def rope_apply_with_cp(x, grid_sizes, freqs, cp_size, cp_rank):
 
 
 @torch.amp.autocast(device_type="cuda", enabled=False)
-def rope_apply_with_position(x, grid_sizes, freqs, position_idx):
+def rope_apply_with_position(x, grid_sizes, freqs, position_idx = 0):
     """
     x:          [B, L, N, C].
     grid_sizes: [B, 3].

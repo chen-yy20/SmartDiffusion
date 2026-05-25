@@ -509,11 +509,12 @@ def _t5(name,
         model_cls = T5Model
 
     # init model
-    with torch.device(device):
+    with torch.device("meta"):
         model = model_cls(**kwargs)
 
     # set device
-    model = model.to(dtype=dtype, device=device)
+    model = model.to_empty(device=device)
+    model = model.to(dtype)
 
     # init tokenizer
     if return_tokenizer:

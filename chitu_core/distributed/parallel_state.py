@@ -348,40 +348,40 @@ def initialize_cfg_group(cfg_size: int, rank: int, local_rank: int, world_size: 
     else:
         raise ValueError("CFG size can only be 1 or 2")
 
-def initialize_cp_group(cp_size: int, cfg_size: int, rank: int, local_rank: int, world_size: int):
+
+def initialize_cp_group(cp_size: int, fpp_size: int, cfg_size: int, rank: int, local_rank: int, world_size: int):
     global _CP_GROUP
     assert _CP_GROUP is None
     
-    if cfg_size == 2:
-        # With CFG parallelism
-        half_size = world_size // 2
-        rank_list = [
-            list(range(0, half_size)),           # First half
-            list(range(half_size, world_size))   # Second half
-        ]
-    elif cp_size == 1:
-        # No CP parallelism
-        rank_list = [ [idx] for idx in range(world_size) ] 
-    else:
-        # No CFG parallelism - all ranks in single group
-        rank_list = [list(range(world_size))]
+    cfg_stride = fpp_size * cp_size
+    fpp_stride = cp_size
+
+    rank_list = []
+    
+    for i in range(cfg_size):
+        for j in range(fpp_size):
+            st_idx = i * cfg_stride + j * fpp_stride
+            sub_group = list(range(st_idx, st_idx + cp_size))
+            rank_list.append(sub_group) 
 
     _CP_GROUP = CommGroup(rank_list, rank, local_rank)
 
-def initialize_fpp_group(fpp_size:int, rank:int, local_rank:int, world_size:int):
+def initialize_fpp_group(cp_size:int ,fpp_size:int, cfg_size:int, rank:int, local_rank:int, world_size:int):
     global _FPP_GROUP
     assert _FPP_GROUP is None
-    
-    if fpp_size <= 1:
-        # No FPP parallelism
-        _FPP_GROUP = CommGroup([[idx] for idx in range(world_size)], rank, local_rank)
-    else:
-        # FPP parallelism
-        assert world_size % fpp_size == 0, "World size must be divisible by FPP size"
-        rank_list = []
-        for i in range(0, world_size, fpp_size):
-            rank_list.append(list(range(i, i + fpp_size)))
-        _FPP_GROUP = CommGroup(rank_list, rank, local_rank)
+        
+    cfg_stride = fpp_size * cp_size
+    rank_list = []
+
+    for i in range(cfg_size):
+        st_idx = i * cfg_stride
+
+        for j in range(cp_size):
+            sub_group = list(range(st_idx + j, st_idx + cfg_stride, cp_size))
+            rank_list.append(sub_group)
+
+    print(f"[FPP Group] rank_list={rank_list}", flush=True)
+    _FPP_GROUP = CommGroup(rank_list, rank, local_rank)
 
 def initialize_up_groups(up_sizes: List[int], up_limit: int, cfg_size: int, rank: int, local_rank: int, world_size: int):
     global _UP_GROUP_DICT
@@ -430,7 +430,7 @@ def initialize_diffusion_parallel_groups(
     assert not _PARALLEL_GROUPS_INITIALIZED
     
     logger.info(
-        f"initialize_diffusion_parallel_groups: {cfg_size=}, {cp_size=}, {up_limit=}"
+        f"initialize_diffusion_parallel_groups: {cfg_size=}, {cp_size=}, {fpp_size=}, {up_limit=}"
     )
     
     rank = torch.distributed.get_rank()
@@ -438,10 +438,12 @@ def initialize_diffusion_parallel_groups(
     world_size = torch.distributed.get_world_size()
     
     # Initialize groups in order
+    # The hierarchy is: World -> CFG -> FPP -> CP -> UP, where each level can have different groupings
+    
     initialize_world_group(rank, local_rank, world_size)
     initialize_cfg_group(cfg_size, rank, local_rank, world_size)
-    initialize_cp_group(cp_size, cfg_size, rank, local_rank, world_size)
-    initialize_fpp_group(fpp_size, rank=rank, local_rank=local_rank, world_size=world_size) 
+    initialize_fpp_group(cp_size,fpp_size, cfg_size, rank, local_rank, world_size)
+    initialize_cp_group(cp_size, fpp_size, cfg_size, rank, local_rank, world_size)
 
     max_up_size = min(up_limit, cp_size)
     up_sizes = [max_up_size, max_up_size // 2] # TODO: More up sizes to support DiTango Support

@@ -49,6 +49,7 @@ infer:
     cfg_size: 1
     cp_size: 1
     fpp_size: 1
+    patch_num: 7
     up_limit: 8
     low_mem_level: 0
     enable_flexcache: False

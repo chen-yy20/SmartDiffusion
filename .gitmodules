@@ -7,3 +7,6 @@
 [submodule "third_party/vbench"]
 	path = third_party/vbench
 	url = https://github.com/guzlq/VBench.git
+[submodule "Wan-Quant-Chanllenge"]
+	path = third_party/Wan-Quant-Chanllenge
+	url = git@github.com:shch-y/Wan-Quant-Chanllenge.git

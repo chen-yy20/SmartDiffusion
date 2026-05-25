@@ -30,6 +30,80 @@ class SequencePadder:
     
         splits = torch.split(tensor, split_size, dim=split_dim)
         return list(splits)
+    
+    @staticmethod
+    def extract_sequence_padding(tensor: torch.Tensor, 
+                                split_num: int,
+                                extract_idx: int,
+                                split_dim: int = 0,
+                                total_split_num: Optional[int] = None,
+                                name: Optional[str] = None) ->torch.Tensor:
+        if name is None:
+            name = SequencePadder.DEFAULT_NAME
+
+        if total_split_num is not None:
+            assert total_split_num % split_num == 0, "total_split_num must be divisible by split_num"
+            factor = total_split_num // split_num
+        else:
+            total_split_num = split_num
+            factor = 1
+        
+        size = tensor.size(split_dim)
+        split_size = (size + total_split_num - 1) // total_split_num
+        pad_size = split_size * total_split_num - size
+        SequencePadder._padding_info[name] = {'original_size': size, 'pad_size': pad_size}
+
+        if pad_size > 0 :
+            pad_shape = list(tensor.shape)
+            pad_shape[split_dim] = pad_size
+            padding = torch.zeros(pad_shape, dtype=tensor.dtype, device=tensor.device)
+            tensor = torch.cat([tensor, padding], dim=split_dim)
+            
+        st_idx = extract_idx * split_size * factor
+        ed_idx = st_idx + split_size * factor
+
+        slicing = [slice(None)] * tensor.dim()
+        slicing[split_dim] = slice(st_idx, ed_idx)
+
+        sub_tensor = tensor[slicing]
+
+        return sub_tensor
+    
+    def extract_sequence_no_padding(tensor: torch.Tensor, extract_idx: int, split_num: int, split_dim: int) -> torch.Tensor:
+        """Extract the original tensor without padding based on padding info"""
+
+        size = tensor.size(split_dim)
+        assert size % split_num == 0, "Tensor size along split_dim must be divisible by split_num"
+
+        split_size = size // split_num
+
+        slicing = [slice(None)] * tensor.dim()
+        slicing[split_dim] = slice(extract_idx * split_size, (extract_idx + 1) * split_size)
+
+        return tensor[slicing]
+    
+    @staticmethod
+    def remove_sequence_padding(tensor: torch.Tensor,
+                                unpad_dim: int = 0,
+                                name: Optional[str] = None
+                                ) -> torch.Tensor:
+        """Remove padding from a tensor based on padding info"""
+        
+        if name is None:
+            name = SequencePadder.DEFAULT_NAME
+
+        info = SequencePadder._padding_info[name]
+        pad_size = info['pad_size']
+        cur_size = tensor.size(unpad_dim)
+        
+        slicing = [slice(None)] * tensor.dim()
+        slicing[unpad_dim] = slice(0, cur_size - pad_size)
+
+        return tensor[slicing]
+
+
+
+
 
     @staticmethod
     def remove_sequence_padding_and_concat(tensor_list: List[torch.Tensor],
@@ -55,24 +129,27 @@ class SequencePadder:
         tensor = tensor[slicing]
         
         return tensor
+    
+    @staticmethod
+    def split_block_idxes(shape: torch.Size, split_dim = 1, block_size: int = 4096) -> List[Tuple[int,int]]:
+        full_size = shape[split_dim]
+        split_num = (full_size + block_size - 1) // block_size
 
-def split_latent(shape: torch.Size, split_num: int, split_dim = 1) -> List[Tuple[int,int]]:
-    
-    full_size = shape[split_dim]
-    split_size = full_size // split_num
-    remainder = full_size % split_num
+        split_start_end_idxs = []
+        
+        start_idx = 0
+        for i in range(split_num):
+            end_idx = min(start_idx + block_size, full_size)
+            split_start_end_idxs.append((start_idx, end_idx))
+            start_idx = end_idx
 
-    split_start_end_idxs = []
+        return split_start_end_idxs
     
-    start_idx = 0
-    for i in range(split_num):
-        end_idx = start_idx + split_size
-        if i < remainder:  
-            end_idx += 1
-        split_start_end_idxs.append((start_idx, end_idx))
-        start_idx = end_idx
-    
-    return split_start_end_idxs
+    @staticmethod
+    def extract_sub_tensor(tensor: torch.Tensor, idxes: Tuple[int, int], dim: int = 1) -> torch.Tensor:
+        slicing = [slice(None)] * tensor.dim()
+        slicing[dim] = slice(idxes[0], idxes[1])
+        return tensor[slicing]
 
 
 

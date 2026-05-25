@@ -1,11 +1,12 @@
 launch:
-  tag: perf
+  tag: 
   num_nodes: 1
-  gpus_per_node: 3
+  gpus_per_node: 8
   python_script: test/test_flexcache.py
   srun:
     partition: a100
-    mem_per_gpu: 60536 
+    # mem_per_gpu: 60536 
+    mem_per_gpu: 30000
     cpus_per_gpu: 16
     job_name: chitu-diffusion
 
@@ -14,30 +15,36 @@ runtime:
   cuda_launch_blocking: false
 
 model:
-  name: Wan2.1-T2V-1.3B
-  ckpt_dir: /home/dataset/Wan2.1-T2V-1.3B
+  # name: Wan2.1-T2V-14B
+  # ckpt_dir: /home/dataset/Wan2.1-T2V-14B
+  name: Wan2.1-T2V-14B
+  ckpt_dir: /home/dataset/Wan2.1-T2V-14B
+
 
 parallel:
   # cfg-parallel factor: only 1 or 2.
-  cfp: 1  
+  cfp: 1
   cp_size : 1
-  fpp_size: 3
+  fpp_size: 1
+  patch_num: 1
 
 infer:
   attn_type: flash_attn
-  low_mem_level: 0
+  low_mem_level: 2
   enable_flexcache: true
   up_limit: 8 
 
 eval:
-  eval_type: [psnr,lpips]
-  reference_path: /home/chenyy/WORK/cyy/SmartDiffusion/outputs/origin/origin_a_cat_walking_on_grass_20260401_174307_wan2_1_t2v_1_3b
+  eval_type: [psnr, lpips]
+  reference_path: /home/shchy/diffusion/SmartDiffusion/outputs/14bstdpp
+  # 15-20 0.15
+  # 75600,4096 ; 
 
 output:
   root_dir: outputs
   enable_run_log: true
   enable_timer_dump: true
-  enable_kv_capture: true
+  enable_kv_capture: false
   hydra_dump_mode: off
 
   

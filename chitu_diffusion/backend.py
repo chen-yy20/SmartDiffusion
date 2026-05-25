@@ -632,11 +632,10 @@ class DiffusionBackend:
             callable or None: RoPE implementation function, or None for default.
         """
 
-        if args.infer.diffusion.cp_size > 1:
+        # if args.infer.diffusion.cp_size > 1:
+        #     return partial(rope_apply_with_cp, cp_size=get_cp_group().group_size, cp_rank=get_cp_group().rank_in_group)
 
-            return partial(rope_apply_with_cp, cp_size=get_cp_group().group_size, cp_rank=get_cp_group().rank_in_group)
-
-        elif args.infer.diffusion.fpp_size >= 1:
+        if args.infer.diffusion.fpp_size > 1 or args.infer.diffusion.cp_size > 1:
             return rope_apply_with_position 
         
         else:
