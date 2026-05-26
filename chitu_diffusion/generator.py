@@ -188,10 +188,13 @@ class ContextParallelDispatcher():
                                                         name='x_cp')
     
     def gather(self, tokens: torch.Tensor):
-        tokens_list = [torch.empty_like(tokens) for _ in range(self.cp_size)]
-        dist.all_gather(tensor_list=tokens_list, 
-                        tensor=tokens, 
-                        group=self.group.gpu_group)
+        if self.cp_size > 1:
+            tokens_list = [torch.empty_like(tokens) for _ in range(self.cp_size)]
+            dist.all_gather(tensor_list=tokens_list, 
+                            tensor=tokens, 
+                            group=self.group.gpu_group)
+        else:
+            tokens_list = [tokens]
         return SequencePadder.remove_sequence_padding_and_concat(tokens_list, 
                                                                  gather_dim=1,
                                                                  name='x_cp')
@@ -231,10 +234,11 @@ class Generator:
         self.cp_rank = get_cp_group().rank_in_group 
 
 
-        if self.cp_size > 1:
+        if self.cp_size > 1 or self.fpp_size > 1:
             self.cp_dispatcher = ContextParallelDispatcher(patch_num=self.patch_num)
             if not self.fpp_size > 1:
                 self.cp_dispatcher.wrap_model_compute_with_cp()
+
         if self.cfg_size == 2:
             self.cfg_dispatcher = CfgDispatcher()
 
@@ -410,6 +414,16 @@ class Generator:
         
 
         for step_idx in range(async_steps1):
+
+            log_progress(
+                logger,
+                stage_name=DiffusionTaskType.Denoise.name,
+                task_id=task.task_id,
+                step=step_idx+warm_up_steps,
+                total=task.req.params.num_inference_steps,
+                interval=self.denoise_progress_interval,
+
+            )
             is_first_step = step_idx % full_inteval == 0
             is_last_step = (step_idx % full_inteval == full_inteval - 2) or (step_idx == async_steps1 - 1)
             # patch_offset = (patch_offset_inteval * step_idx) % patch_num
@@ -458,8 +472,7 @@ class Generator:
         context_embedding = model._cal_context_embeddings(context, clip_fea)
 
 
-        if self.cp_size > 1:
-            tokens = self.cp_dispatcher.dispatch(tokens)
+        tokens = self.cp_dispatcher.dispatch(tokens)
 
         fpp_group = get_fpp_group() 
         if not fpp_group.is_first_rank: 
@@ -499,7 +512,7 @@ class Generator:
             # print(f"Rank {self.pp_rank}: saved_stale_tokens", flush=True)
 
             time_embedding = model._cal_time_embeddings(t)
-            tokens = self.cp_dispatcher.gather(tokens) if self.cp_size > 1 else tokens
+            tokens = self.cp_dispatcher.gather(tokens)
 
             latents = model._post_dit(tokens, time_embedding, grid_sizes)
             return latents[0].to(torch.float32)
@@ -663,8 +676,8 @@ class Generator:
     
                 hidden_states : torch.Tensor = model._cal_patch_embedding(task.buffer.latents, seq_len=task.buffer.seq_len)
 
-                if self.cp_size > 1:
-                    hidden_states = self.cp_dispatcher.dispatch(hidden_states)
+
+                hidden_states = self.cp_dispatcher.dispatch(hidden_states)
 
                 # assert hidden_states.shape == torch.Size([1, task.buffer.seq_len, model.dim]), f"Expected hidden states shape {[1, task.buffer.seq_len, model.dim]}, but got {hidden_states.shape}"
                 
@@ -743,8 +756,8 @@ class Generator:
                     hidden_states_cond = cache_strategy.update_stale_tokens_patch(hidden_states_cond_patch, (position_idx, position_idx_end), is_pos=True)
                     hidden_states_uncond = cache_strategy.update_stale_tokens_patch(hidden_states_uncond_patch, (position_idx, position_idx_end), is_pos=False)
 
-                    hidden_states_cond = self.cp_dispatcher.gather(hidden_states_cond) if self.cp_size > 1 else hidden_states_cond
-                    hidden_states_uncond = self.cp_dispatcher.gather(hidden_states_uncond) if self.cp_size > 1 else hidden_states_uncond
+                    hidden_states_cond = self.cp_dispatcher.gather(hidden_states_cond)
+                    hidden_states_uncond = self.cp_dispatcher.gather(hidden_states_uncond)
 
                     latents_cond = model._post_dit(hidden_states_cond, time_embedding, grid_sizes)[0].to(torch.float32)
                     latents_uncond = model._post_dit(hidden_states_uncond, time_embedding, grid_sizes)[0].to(torch.float32)
