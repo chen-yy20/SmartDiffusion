@@ -204,7 +204,8 @@ class ContextParallelDispatcher():
             def wrapped_compute(tokens, **kwargs):
                 tokens = self.dispatch(tokens)
                 if "position_idx" in kwargs.keys():
-                    kwargs["position_idx"] = kwargs["position_idx"] + self.rank_in_group * tokens.size(1) # adjust position idx for CP
+                    prev_positional_idx = kwargs["position_idx"] if kwargs["position_idx"] else 0
+                    kwargs["position_idx"] = prev_positional_idx + self.rank_in_group * tokens.size(1) # adjust position idx for CP
                 x = original_forward(tokens, **kwargs)
                 x = self.gather(x)
                 return x
@@ -515,8 +516,8 @@ class Generator:
 
         timestep = task.buffer.timesteps[task.buffer.current_step]
         model : WanModel = DiffusionBackend.active_model
-        total_split_num = self.patch_num * self.fpp_size
-        fpp_stride = (task.buffer.seq_len + total_split_num - 1) // total_split_num
+        total_split_num = self.patch_num * self.cp_size
+        fpp_stride = (task.buffer.unpad_seq_len + total_split_num - 1) // total_split_num
         cp_stride = fpp_stride * self.patch_num
         # assert DiffusionBackend.guidance_scale > 0 and self.cfg_size == 1 and self.fpp_size > 1
 
@@ -600,7 +601,7 @@ class Generator:
         cp_group = get_cp_group()
 
         total_split_num = patch_num * self.cp_size
-        fpp_stride = (task.buffer.seq_len + total_split_num - 1) // total_split_num
+        fpp_stride = (task.buffer.unpad_seq_len + total_split_num - 1) // total_split_num
         cp_stride = fpp_stride * patch_num
 
 
@@ -1245,7 +1246,7 @@ class Generator:
             
             patch_size = DiffusionBackend.args.models.transformer.patch_size
 
-            split_num = self.cp_size * self.fpp_size
+            split_num = self.cp_size * self.patch_num
 
             frames_seq_stride = target_shape[2] * target_shape[3] // (patch_size[1] * patch_size[2])
 

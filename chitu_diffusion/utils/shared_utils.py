@@ -65,6 +65,7 @@ class SequencePadder:
         slicing = [slice(None)] * tensor.dim()
         slicing[split_dim] = slice(st_idx, ed_idx)
 
+        slicing = tuple(slicing)
         sub_tensor = tensor[slicing]
 
         return sub_tensor
@@ -79,7 +80,8 @@ class SequencePadder:
 
         slicing = [slice(None)] * tensor.dim()
         slicing[split_dim] = slice(extract_idx * split_size, (extract_idx + 1) * split_size)
-
+        
+        slicing = tuple(slicing)
         return tensor[slicing]
     
     @staticmethod
@@ -126,6 +128,8 @@ class SequencePadder:
         tensor = torch.cat(tensor_list, dim=gather_dim)
         slicing = [slice(None)] * tensor.dim()
         slicing[gather_dim] = slice(0, original_size)
+
+        slicing = tuple(slicing)
         tensor = tensor[slicing]
         
         return tensor

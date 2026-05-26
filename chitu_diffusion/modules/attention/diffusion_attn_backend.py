@@ -275,10 +275,14 @@ class DiffusionAttention_with_CP:
         """
         recv_tensors = []
         
+        dst_rank = self.group.rank_list[dst_rank]
+        src_rank = self.group.rank_list[src_rank]
         for tensor in tensors:
             send_tensor = tensor
             recv_size = send_tensor.shape
             recv_dtype = send_tensor.dtype
+
+
             self.group.p2p_isend(send_tensor, dst=dst_rank)
             next_tensor = self.group.p2p_irecv(size=recv_size, dtype=recv_dtype, src=src_rank)
             recv_tensors.append(next_tensor)
@@ -346,7 +350,7 @@ class DiffusionAttention_with_CP:
             seq_dim = 1
             head_dim=2
 
-        ring_next_rank = (local_rank - ulysses_size) % cp_size
+        ring_next_rank = (local_rank - ulysses_size + cp_size) % cp_size
         ring_prev_rank = (local_rank + ulysses_size) % cp_size
         out, lse = None, None
         fresh_out, fresh_lse = None, None
