@@ -635,11 +635,11 @@ class DiffusionBackend:
         # if args.infer.diffusion.cp_size > 1:
         #     return partial(rope_apply_with_cp, cp_size=get_cp_group().group_size, cp_rank=get_cp_group().rank_in_group)
 
-        if args.infer.diffusion.fpp_size > 1 or args.infer.diffusion.cp_size > 1:
-            return rope_apply_with_position 
+        # if args.infer.diffusion.fpp_size > 1 or args.infer.diffusion.cp_size > 1:
+        return rope_apply_with_position 
         
-        else:
-            return naive_rope_apply 
+        # else:
+        #     return naive_rope_apply 
 
 
     # hmx: refactored for Wan2.2 because it has two noise models

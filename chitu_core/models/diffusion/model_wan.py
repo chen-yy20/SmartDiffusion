@@ -746,7 +746,8 @@ class WanModel(ModelMixin, ConfigMixin):
         clip_fea=None,
         y=None,
         save_cache=False,
-        position_idx=None,
+        init_cache=False,
+        position_idx=0,
     ):
         """
         完整的前向传播，现在拆分为三个阶段
@@ -758,9 +759,9 @@ class WanModel(ModelMixin, ConfigMixin):
         context_embedding = self._cal_context_embeddings(context, clip_fea)
 
 
-        tokens = self.model_compute(tokens, time_proj=time_proj, context_embedding=context_embedding, grid_sizes=grid_sizes, save_cache=save_cache, position_idx=position_idx)
+        tokens = self.model_compute(tokens, time_proj=time_proj, context_embedding=context_embedding, grid_sizes=grid_sizes, init_cache=init_cache,save_cache=save_cache, position_idx=position_idx)
 
-        if save_cache:
+        if init_cache:
             self.cache_manager.strategy.init_stale_tokens(tokens)
 
         time_embedding = self._cal_time_embeddings(t)

@@ -53,6 +53,7 @@ infer:
     up_limit: 8
     low_mem_level: 0
     enable_flexcache: False
+    fpp_debug: False
 
 eval:
   eval_type: [] # list items in: vbench, fid, fvd, psnr, ssim, lpips

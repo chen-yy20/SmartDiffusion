@@ -311,12 +311,12 @@ class Generator:
         elif task_type == DiffusionTaskType.VAEDecode:
             out = self.vae_decode_step(task)
         elif task_type == DiffusionTaskType.Denoise:
-            debug = False
+            fpp_debug = bool(getattr(DiffusionBackend.args.infer.diffusion, "fpp_debug", False))
             if self.fpp_size > 1:
                 self.fpp_denoise_steps(task)
                 return
 
-            elif debug:
+            elif fpp_debug:
                 self.debug_denoise_steps_patch(task)
                 return
             else:
@@ -336,23 +336,27 @@ class Generator:
         cool_down_steps = task.req.params.flexcache_params.cooldown
         patch_steps = task.req.params.num_inference_steps - warm_up_steps - cool_down_steps
 
-        patch_steps = 10
         
-        patch_num = 21 
+        patch_num = DiffusionBackend.args.infer.diffusion.patch_num
         print(f"[INFO] patch_num:{patch_num}")
         for step_idx in range(warm_up_steps):
             print(f"Rank {self.rank} starting warmup step {step_idx+1}/{warm_up_steps}", flush=True)
-            out = self.denoise_step(task, save_cache= step_idx == warm_up_steps - 1)
+            out = self.denoise_step(task, init_cache= step_idx == warm_up_steps - 1)
             task.buffer.latents = out
             task.buffer.current_step += 1
 
+        patch_order = list(range(patch_num))
+        device_num = patch_num * 2 // 3
 
+        boundary = patch_num - device_num
         for step_idx in range(patch_steps):
             # import pdb; pdb.set_trace()
             # use_std_path = os.getenv("CHITU_DEBUG_FPP", "0") == "1"
             print(f"Rank {self.rank} starting patch step {step_idx+1}/{patch_steps}", flush=True)
 
-            self.patch_denoise_one_step(task, patch_num, no_latents_cache=False)
+            
+            patch_order = patch_order[boundary:] + patch_order[:boundary][::-1]
+            self.patch_denoise_one_step(task, patch_num, patch_order)
             
 
         for step_idx in range(cool_down_steps):
@@ -797,14 +801,11 @@ class Generator:
 
     @amp.autocast(device_type="cuda", dtype=torch.bfloat16)
     @torch.no_grad()
-    def patch_denoise_one_step(self, task: DiffusionTask, patch_num: int, no_latents_cache: bool = True):
+    def patch_denoise_one_step(self, task: DiffusionTask, patch_num: int, patch_order):
         # for debugging fpp_denoise_one_step, run patch forward on single device.
         model: WanModel = DiffusionBackend.active_model
         cache_strategy : FlexCacheStrategy = DiffusionBackend.flexcache.strategy
         patch_seq_len = task.buffer.seq_len // patch_num
-        device_num = patch_num
-
-
 
         time_emb = model._cal_time_embeddings(task.buffer.timesteps[task.buffer.current_step])
         time_proj = model._cal_timeproj(task.buffer.timesteps[task.buffer.current_step])
@@ -819,15 +820,16 @@ class Generator:
         original_latents = task.buffer.latents.clone()
         # import pdb; pdb.set_trace()
         for patch_idx in range(patch_num):
+            patch_idx_cal = patch_order[patch_idx]
             hidden_states = model._cal_patch_embedding(task.buffer.latents, seq_len=task.buffer.seq_len)
             hidden_states_list = SequencePadder.split_sequence_padding(hidden_states, patch_num, split_dim=1, name='fpp')
 
-            hidden_states_patch = hidden_states_list[patch_idx] 
+            hidden_states_patch = hidden_states_list[patch_idx_cal] 
 
             hidden_states_cond_patch = hidden_states_patch.clone()
             hidden_states_uncond_patch = hidden_states_patch.clone()
 
-            position_idx = patch_idx * patch_seq_len
+            position_idx = patch_idx_cal * patch_seq_len
             position_idx_end = min(position_idx + patch_seq_len, task.buffer.unpad_seq_len)
 
             DiffusionBackend.cfg_type = CFGType.POS
@@ -913,7 +915,7 @@ class Generator:
     @Timer.get_timer("denoise")
     @amp.autocast(device_type="cuda", dtype=torch.bfloat16)
     @torch.no_grad()
-    def denoise_step(self, task: DiffusionTask, save_cache: bool = False):
+    def denoise_step(self, task: DiffusionTask, init_cache: bool = False):
         assert task.buffer.latents is not None and task.buffer.timesteps is not None
 
         if DiffusionBackend.args.models.name in ["FLUX.2-klein-4B"]:
@@ -964,7 +966,8 @@ class Generator:
                         t=timestep,
                         context=task.buffer.text_embeddings,
                         seq_len=task.buffer.seq_len,
-                        save_cache=save_cache,
+                        init_cache=init_cache,
+
                     )
                     DiffusionBackend.cfg_type = CFGType.NEG
                     noise_pred_uncond = DiffusionBackend.active_model(
@@ -972,7 +975,7 @@ class Generator:
                         t=timestep,
                         context=task.buffer.negative_embeddings,
                         seq_len=task.buffer.seq_len,
-                        save_cache=save_cache,
+                        init_cache=init_cache,
                     )
 
             noise_pred = noise_pred_uncond + \
