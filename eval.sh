@@ -1,0 +1,1 @@
+python chitu_diffusion/eval/reference_runner.py --reference outputs/flex_teacache-20260528_144035-44230923/results/44230923/a_cat_walking_on_grass._seed42_step50.mp4 --generated outputs/flex_teacache-20260528_143701-94627177/results/94627177/a_cat_walking_on_grass._seed42_step50.mp4 --max-frames 81

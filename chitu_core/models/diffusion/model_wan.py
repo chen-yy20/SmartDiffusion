@@ -647,7 +647,7 @@ class WanModel(ModelMixin, ConfigMixin):
                 patch_idx=patch_idx,
                 save_cache=save_cache,
                 init_cache=init_cache,
-                cache_manager=self.cache_manager.strategy,
+                cache_manager=self.cache_manager.strategy if self.cache_manager else None,
                 layer_idx=i,
             )
         return x
